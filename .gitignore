@@ -218,3 +218,27 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Nuxt frontend
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/.data/
+
+# Local referral files and secrets
+*.pdf
+*.png
+*.jpg
+*.jpeg
+.local/
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Frontend source helpers (the Python template above ignores lib/)
+!frontend/app/lib/
+!frontend/app/lib/**
+
+# Local-only symlinks to supplied referral packets and their preview manifest
+frontend/public/local-demo/
