@@ -77,18 +77,18 @@ function formatReceived(iso: string) {
 }
 
 // One summary card per status; clicking a card toggles that status filter.
-const CARD_STYLE: Record<ReviewStatus, { icon: unknown; tone: string }> = {
-  new: { icon: Inbox, tone: "text-sky-800" },
-  in_review: { icon: Eye, tone: "text-violet-800" },
-  needs_info: { icon: CircleHelp, tone: "text-amber-700" },
-  approved: { icon: CheckCircle2, tone: "text-emerald-700" },
-  denied: { icon: XCircle, tone: "text-red-700" },
+const CARD_ICON: Record<ReviewStatus, unknown> = {
+  new: Inbox,
+  in_review: Eye,
+  needs_info: CircleHelp,
+  approved: CheckCircle2,
+  denied: XCircle,
 };
 const cards = computed(() => STATUS_ORDER.map((key) => ({
   key,
   label: STATUS[key].label,
   value: stored.value.filter((r) => r.intake.reviewStatus === key).length,
-  ...CARD_STYLE[key],
+  icon: CARD_ICON[key],
 })));
 
 // Filters and sorting
@@ -192,10 +192,10 @@ function open(r: Referral) {
       >
         <CardHeader class="px-4">
           <CardDescription class="text-xs font-medium">{{ card.label }}</CardDescription>
-          <CardAction><component :is="card.icon as any" class="size-4" :class="card.tone" /></CardAction>
+          <CardAction><component :is="card.icon as any" class="size-4 text-muted-foreground" /></CardAction>
         </CardHeader>
         <CardContent class="px-4">
-          <CardTitle class="text-2xl font-semibold tabular-nums" :class="card.tone">{{ card.value }}</CardTitle>
+          <CardTitle class="text-2xl font-semibold tabular-nums">{{ card.value }}</CardTitle>
         </CardContent>
       </Card>
     </section>
