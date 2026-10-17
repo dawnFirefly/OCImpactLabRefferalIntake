@@ -239,3 +239,6 @@ frontend/.data/
 # Frontend source helpers (the Python template above ignores lib/)
 !frontend/app/lib/
 !frontend/app/lib/**
+
+# Local-only symlinks to supplied referral packets and their preview manifest
+frontend/public/local-demo/

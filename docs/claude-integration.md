@@ -31,6 +31,8 @@ Use `Referral` in `frontend/app/types.ts` as the current screen contract. Versio
 
 The source-review dialog renders the cited PDF page and overlays the provided normalized bounding box. It scrolls the highlight into view. Source switching and page navigation are implemented by `PdfSourceViewer.client.vue`. The demo's anchors are authored alongside synthetic PDF rows, not inferred. Processing streams, model-produced evidence/anchors, server persistence, and criteria evaluation are future work. Browser preview of an attached file does not analyze its content.
 
+The optional local-demo linker exposes R01/R02 as ignored static symlinks and a metadata manifest. These are separate preview-only referrals. Loading one clears fictional facts and checklist results; only the synthetic flow has authored demonstration anchors. Do not publish the local-only static assets.
+
 ## Domain sources for the next task
 
 The repo's original `Doc` file links to the team's working notes. The challenge's authoritative materials are in [the organizer's referral-intake folder](https://github.com/travcjohnson/claude-impact-lab-oc/tree/main/challenges/1-referral-intake), including admission criteria, referral-form checklist, and separate historical labels.

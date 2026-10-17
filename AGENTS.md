@@ -48,6 +48,8 @@ Read the relevant project skill when continuing work:
 
 The original R01/R02 packets are external files, not repository fixtures. Do not commit PDFs, screenshots of real packets, extracted packet text, credentials, or patient data. Keep fixtures fictional. Blacked-out data in the challenge examples means redacted for privacy, not missing.
 
+For explicitly requested local packet previews, `scripts/link-demo-pdfs.mjs` creates ignored symlinks and a metadata manifest in `frontend/public/local-demo/`. R01/R02 remain separate referrals. The UI discovers these on mount and offers a switch back to the synthetic flow. Never assign fictional facts/anchors to a real packet. Do not distribute a build containing these local-only assets.
+
 Historical labels supplied by IHH are evaluation outcomes; reasons were not recorded. They must not be used to fabricate rationales or hardcode model decisions. Distinguish evidence found, not found, conflicting, and coordinator-confirmed. A checklist count is not a clinical admission decision.
 
 The challenge's official criteria are linked in `docs/claude-integration.md`. When later implementing rule review, preserve source rule IDs and their stated precedence, including case-by-case decisions and conditional requirements.

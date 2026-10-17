@@ -34,8 +34,17 @@ import {
 } from "@/components/ui/dialog";
 import type { Fact, Rule, Evidence, PacketDocument } from "./types";
 
-const { referral, error, resetDemo, attach, updateFact, updateRule } =
-  useReviewWorkspace();
+const {
+  referral,
+  error,
+  resetDemo,
+  attach,
+  updateFact,
+  updateRule,
+  mode,
+  providedDocuments,
+  useProvidedDocument,
+} = useReviewWorkspace();
 const selectedDoc = ref<string | null>(null),
   selectedFact = ref<string | null>(null);
 const group = ref("All factors"),
@@ -54,6 +63,19 @@ const editValue = ref(""),
 const previewDocument = ref<PacketDocument | null>(null),
   previewOpen = ref(false);
 const { fitView, zoomIn, zoomOut } = useVueFlow();
+const displayedDocuments = computed(() =>
+  mode.value === "provided"
+    ? providedDocuments.value
+    : referral.value.documents,
+);
+function showProvided() {
+  graphPage.value = 0;
+  if (providedDocuments.value[0]) {
+    useProvidedDocument(providedDocuments.value[0]);
+    selectedDoc.value = null;
+    selectedFact.value = null;
+  }
+}
 const awaitingClaude = computed(
   () => referral.value.status === "awaiting_claude",
 );
@@ -186,6 +208,10 @@ function demo() {
   group.value = "All factors";
 }
 function openDocument(doc: PacketDocument) {
+  if (doc.status === "provided_demo") {
+    useProvidedDocument(doc);
+    selectedFact.value = null;
+  }
   selectedDoc.value = doc.id;
   previewDocument.value = doc;
   previewOpen.value = true;
@@ -305,13 +331,13 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
         <div class="head-row">
           <h1 id="documents-title">Documents</h1>
           <span class="muted tiny mono">{{
-            String(referral.documents.length).padStart(2, "0")
+            String(displayedDocuments.length).padStart(2, "0")
           }}</span>
         </div>
       </header>
       <div class="scroll-body">
         <div class="files">
-          <div v-for="doc in referral.documents" :key="doc.id">
+          <div v-for="doc in displayedDocuments" :key="doc.id">
             <button
               class="file-row"
               :class="{ active: selectedDoc === doc.id }"
@@ -325,7 +351,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
                 <div class="file-meta">
                   {{
                     doc.page_count
-                      ? `${doc.page_count} pages · example`
+                      ? `${doc.page_count} pages · ${doc.status === "provided_demo" ? "provided example" : "example"}`
                       : "Attached · awaiting Claude"
                   }}
                 </div>
@@ -348,7 +374,11 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             @change="upload(($event.target as HTMLInputElement).files)"
           /><Plus :size="18" /><span>Add PDFs</span></label
         >
-        <div v-if="awaitingClaude" class="local-label">
+        <div v-if="mode === 'provided'" class="local-label">
+          R01 and R02 are separate redacted referrals.<br />Preview only;
+          analysis awaits Claude.
+        </div>
+        <div v-else-if="awaitingClaude" class="local-label">
           Files are attached in this browser session.<br />Claude analysis will
           be connected later.
         </div>
@@ -356,9 +386,19 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
       </div>
       <footer class="panel-foot">
         <span>{{
-          awaitingClaude ? "Awaiting integration" : "Synthetic demo"
-        }}</span
-        ><button @click="demo">Reset demo</button>
+          mode === "provided"
+            ? "Provided PDFs"
+            : awaitingClaude
+              ? "Awaiting integration"
+              : "Synthetic flow"
+        }}</span>
+        <button v-if="mode !== 'synthetic'" @click="demo">
+          Synthetic flow
+        </button>
+        <button v-else-if="providedDocuments.length" @click="showProvided">
+          Provided PDFs
+        </button>
+        <button v-else @click="demo">Reset demo</button>
       </footer>
     </section>
     <section class="panel processor" aria-labelledby="processor-title">
@@ -703,7 +743,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
           ><DialogDescription>{{
             previewDocument?.status === "demo"
               ? "Synthetic example PDF."
-              : "Browser preview only. This file has not been analyzed or sent to a model."
+              : "Provided PDF · browser preview only. This file has not been analyzed or sent to a model."
           }}</DialogDescription></DialogHeader
         ><ClientOnly
           ><PdfSourceViewer

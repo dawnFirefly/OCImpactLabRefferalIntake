@@ -16,6 +16,18 @@ npm run dev
 
 Open [localhost:3000](http://127.0.0.1:3000).
 
+### Use the supplied R01 / R02 PDFs locally
+
+```sh
+node scripts/link-demo-pdfs.mjs /path/to/referral-packets
+cd frontend
+npm run dev
+```
+
+Pass the containing directory, not an individual PDF. The script creates Git-ignored symlinks, without copying or analyzing PDF contents. The document panel lists R01 and R02 as separate previewable referrals. Choose **Synthetic flow** to demonstrate information nodes and authored highlights; choose **Provided PDFs** to return to the original packets. The original packets have no inferred information or highlights until Claude is connected.
+
+These links are local demo assets. Do not publish or distribute a build containing the provided packets; keep the ignored `frontend/public/local-demo/` directory out of shared artifacts.
+
 ## What works
 
 - Three-panel workspace with synthetic, clearly labeled example data.
