@@ -1,10 +1,83 @@
 # ReferralReady
 
+**Turns a 15–35 page scanned hospital referral packet into a source-linked admission recommendation a coordinator can verify in minutes, inside the 2-hour review window.**
+
+## Team
+
+- Team: Dawn Firefly (OC Impact Lab, Illumination Health + Home challenge)
+- Members: _add names here_
+
+## The problem
+
+Illumination Health + Home (IHH) intake coordinators must review every recuperative-care referral within 2 hours. Packets arrive as long, faxed, partly redacted scans. The coordinator has to find dozens of facts (housing, cognition, ADLs, mobility, infections, required documents) and check them against a multi-page admission rulebook with precedence rules and case-by-case exceptions.
+
+## What we built
+
+- **Referral intake dashboard:** upload a packet, optional intake details, 2-hour countdown, status (Open / In review / Needs info / Approved / Denied), search, filters, sorting and Claude's suggested decision per row.
+- **Decision processor:** PDF → forms → patient facts → IHH criteria as a connected graph, with every fact linked to its cited page.
+- **Summary:** the recommendation and its reasons, discrepancies and gaps, the required documents checklist (DOC-1 to DOC-10) and the criteria by decision-tree stage, beside the PDF with the cited page opened.
+- **Storage:** PDFs and saved analyses in Cloudflare R2 when deployed (local disk when run locally), so a packet is analyzed once.
+
+## Demo video
+
+_Add link here_
+
+## How Claude is used
+
+**While building:** Claude Code (and Codex) wrote and reviewed most of the code, tests and docs, under human direction.
+
+**Inside the tool** (two passes per packet, `frontend/server/utils/run-analysis.ts`):
+1. Claude reads the scanned PDF directly and returns forms, facts, page citations and approximate positions (structured JSON, schema-validated).
+2. Claude reviews those facts against every IHH rule ID and returns met / not met / missing / uncertain with a note. A deterministic decision tree (`frontend/shared/decision-tree.ts`) turns the rule statuses into the recommendation.
+
+**What a person checks:** every recommendation is a suggestion. The coordinator verifies each cited page, resolves uncertain and conflicting items, checks rules the packet cannot answer (e.g. the CalAIM 182-day cap), and sets the final status. The tool never admits or denies anyone, and nothing is sent to IHH or the referring hospital.
+
+## Real vs. mocked
+
+| Part | Status |
+| --- | --- |
+| PDF upload and storage (R2 / local disk) | Real |
+| Claude reading the PDF and reviewing criteria | Real (needs `NUXT_ANTHROPIC_API_KEY`) |
+| Decision tree and recommendation | Real, deterministic over Claude's rule statuses |
+| Page citations | Real (model-reported) |
+| Highlight boxes on the page | Real but approximate; often off (see below) |
+| "Synthetic UI example" applicant | Mocked, fictional data |
+| Draft hospital response | Not built (draft-only by design if added) |
+| Connection to IHH systems, emails, faxes | None |
+| Login | Cloudflare Access on the deployed site; none locally |
+
+## Where it gets things wrong
+
+- **Highlight positions are often wrong.** Packets are scanned images with no text layer, so the box comes from Claude estimating position by eye; we measured errors of 5–35% of page height. The cited page is reliable; the box is not.
+- **Thin extraction on long packets** can mark many criteria "missing" when the facts are in the PDF. Re-run, or use a stronger extraction model (`NUXT_CLAUDE_EXTRACTION_MODEL`).
+- **Redactions and conflicts** (e.g. a dementia code vs. an unchecked cognitive-impairment box) are deliberately left "uncertain" for the coordinator, so many packets come back "Needs review".
+- **Slow PDF loading** on large scanned packets; analysis takes about 1.5–2.5 minutes and the tab must stay open.
+
+## Next steps
+
+- A dedicated page-by-page localization pass for accurate highlights.
+- Draft hospital response (copy-only, never sent automatically).
+- Background analysis that survives closing the tab (queue or Durable Object).
+- Evaluation against more labelled packets, and coordinator feedback on rule wording.
+
+## Data and privacy
+
+- No referral packets, rendered pages, OCR text or screenshots of packets are in this repository or its history. Sample packets stay outside the repo; `*.pdf` and images are git-ignored.
+- No API keys are committed; secrets come from environment variables (`frontend/.env.local` locally, Cloudflare Worker secrets in production).
+- Packets are sent only to the Anthropic API for analysis and stored only in the team's private R2 bucket or the local `.data` folder.
+- Nothing connects to IHH systems or sends messages.
+- Historical IHH outcome labels are never used to drive or explain decisions.
+- License: MIT (see `LICENSE`).
+
+---
+
+## Technical details
+
 A local referral-review workspace: **one combined scanned PDF + patient name → document forms → patient facts → application requirements**.
 
 Built with Nuxt 4, Vue 3, shadcn-vue and Vue Flow. The Nuxt server sends the PDF to Claude for visual analysis; a second Claude pass reviews the extracted evidence against the organizer's IHH adult criteria. No local OCR or PDF text extraction is used.
 
-## Run
+### Run
 
 Use Node.js 26+ and npm.
 
