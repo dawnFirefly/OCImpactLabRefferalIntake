@@ -8,7 +8,7 @@ useHead({ title: "Decision processor · ReferralReady" });
   <div>
     <DecisionProcessor />
     <div class="processor-next">
-      <span>Summary structure is ready for the next step.</span>
+      <span>Review the recommendation, gaps and criteria with their source pages.</span>
       <Button as-child><NuxtLink to="/summary">Continue to summary →</NuxtLink></Button>
     </div>
   </div>

@@ -44,6 +44,7 @@ const {
   mode,
   providedDocuments,
   useProvidedDocument,
+  backgroundIds,
 } = inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
 const selectedDoc = ref<string | null>(null),
   selectedFact = ref<string | null>(null);
@@ -407,12 +408,16 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             </button>
           </div>
         </div>
-        <div v-if="mode !== 'synthetic' && referral.documents.length && !analyzing" class="source-actions">
-          <!-- Provided packets never auto-analyze; uploads do. Retry is always explicit. -->
-          <Button v-if="mode === 'provided' || error || referral.status === 'analyzed'" size="sm" :variant="referral.status === 'analyzed' ? 'outline' : 'default'" :disabled="savingPdf" @click="analyze">
+        <div v-if="backgroundIds.has(referral.id)" class="local-label" role="status">
+          <span class="status-dot busy" />Claude is analyzing this packet in the background. Results appear here when it finishes and are saved with the applicant.
+        </div>
+        <div v-else-if="mode !== 'synthetic' && referral.documents.length && !analyzing" class="source-actions">
+          <!-- Provided and dashboard-stored packets never auto-analyze; processor uploads do. Retry is always explicit. -->
+          <Button v-if="mode === 'provided' || error || referral.status === 'analyzed' || referral.documents[0]?.status === 'stored'" size="sm" :variant="referral.status === 'analyzed' ? 'outline' : 'default'" :disabled="savingPdf" @click="analyze">
             {{ referral.status === 'analyzed' ? 'Analyze again' : error ? 'Retry analysis' : 'Analyze with Claude' }}
           </Button>
-          <Button size="sm" variant="ghost" :disabled="savingPdf || !!referral.documents[0]?.storage" @click="savePdf">{{ savingPdf ? 'Saving PDF…' : referral.documents[0]?.storage ? 'PDF saved privately' : 'Save PDF to private storage' }}</Button>
+          <!-- Dashboard applicants are already stored by /api/applicants. -->
+          <Button v-if="referral.documents[0]?.status !== 'stored' && !referral.intake" size="sm" variant="ghost" :disabled="savingPdf || !!referral.documents[0]?.storage" @click="savePdf">{{ savingPdf ? 'Saving PDF…' : referral.documents[0]?.storage ? 'PDF saved privately' : 'Save PDF to private storage' }}</Button>
         </div>
         <div v-if="isPacketMock" class="local-label">R01 mock review · based on your packet summary, not extracted findings.</div>
         <div v-if="error" class="error-box" role="alert">{{ error }}</div>

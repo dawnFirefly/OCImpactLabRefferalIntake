@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, CircleHelp, Clock, EllipsisVertical, Eye, Inbox, Pencil, Plus, Search, Trash2, XCircle } from "@lucide/vue";
+import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, CircleHelp, Clock, EllipsisVertical, Eye, Inbox, Loader2, Sparkles, Pencil, Plus, Search, Trash2, XCircle } from "@lucide/vue";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -16,8 +16,9 @@ import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, Sele
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { Referral, ReviewStatus } from "~/types";
 import { REVIEW_WINDOW_MS } from "~/composables/useReviewWorkspace";
+import { outcomeLabels } from "#shared/decision-tree";
 
-const { applicants, selectApplicant, loadStoredApplicants, updateStoredApplicant, deleteStoredApplicant } =
+const { applicants, selectApplicant, loadStoredApplicants, updateStoredApplicant, deleteStoredApplicant, analyzeInBackground, backgroundIds, backgroundErrors } =
   inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
 useHead({ title: "Applicants · ReferralReady" });
 
@@ -128,6 +129,15 @@ const rows = computed(() => {
   };
   return list.sort(compare[sortBy.value]);
 });
+
+/** Claude's suggested decision for a row (coordinator still decides). */
+function suggestion(r: Row) {
+  const a = r.intake.analysis;
+  if (!a?.outcome) return null;
+  const tone = a.outcome === "approved" ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+    : a.outcome === "denied" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800";
+  return { label: outcomeLabels[a.outcome], tone, title: `${outcomeLabels[a.outcome]}${a.stage ? ` · Stage ${a.stage}` : ""} · analyzed ${new Date(a.analyzedAt).toLocaleString()}` };
+}
 
 // Row actions
 async function setStatus(r: Row, status: unknown) {
@@ -251,6 +261,7 @@ function open(r: Referral) {
               <TableHead>Time to review</TableHead>
               <TableHead>Referring facility</TableHead>
               <TableHead>Reviewer</TableHead>
+              <TableHead>Suggested decision</TableHead>
               <TableHead>Status</TableHead>
               <TableHead class="pr-5 text-right"><span class="sr-only">Actions</span></TableHead>
             </TableRow>
@@ -273,6 +284,15 @@ function open(r: Referral) {
               </TableCell>
               <TableCell class="max-w-[180px] truncate">{{ r.intake.source || "—" }}</TableCell>
               <TableCell>{{ r.intake.reviewer || "—" }}</TableCell>
+              <TableCell>
+                <Badge v-if="backgroundIds.has(r.id)" variant="outline" class="text-muted-foreground"><Loader2 class="animate-spin" />Analyzing…</Badge>
+                <Badge v-else-if="suggestion(r)" variant="outline" :class="suggestion(r)!.tone" :title="suggestion(r)!.title">{{ suggestion(r)!.label }}</Badge>
+                <span v-else-if="backgroundErrors.get(r.id)" class="flex items-center gap-1 text-xs text-destructive" :title="backgroundErrors.get(r.id)">
+                  Analysis failed
+                  <Button variant="link" size="sm" class="h-auto p-0 text-xs" @click="analyzeInBackground(r.id)">Retry</Button>
+                </span>
+                <Button v-else variant="ghost" size="sm" class="h-7 px-2 text-xs text-muted-foreground" @click="analyzeInBackground(r.id)"><Sparkles class="size-3.5" />Analyze</Button>
+              </TableCell>
               <TableCell>
                 <Select :model-value="r.intake.reviewStatus" @update:model-value="setStatus(r, $event)">
                   <SelectTrigger size="sm" class="w-[130px] rounded-full" :class="STATUS[r.intake.reviewStatus].class" :aria-label="`Status for ${r.title}`">
@@ -300,7 +320,7 @@ function open(r: Referral) {
               </TableCell>
             </TableRow>
             <TableRow v-if="!rows.length" class="hover:bg-transparent">
-              <TableCell colspan="7" class="py-14 text-center">
+              <TableCell colspan="8" class="py-14 text-center">
                 <template v-if="loading">Loading applicants…</template>
                 <template v-else-if="!stored.length">
                   <Inbox class="mx-auto mb-3 size-8 text-muted-foreground" />

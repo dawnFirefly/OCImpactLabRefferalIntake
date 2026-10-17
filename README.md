@@ -73,7 +73,7 @@ npm run build
 
 Contract tests cover source/section/fact/rule links, invalid model output, missing/redacted evidence, precedence, recommendations and provider failures. Live model accuracy must be evaluated separately with a valid replacement key; historical outcome labels are never model inputs.
 
-The only routes remain `/` (skeletal applicant dashboard), `/processor`, and `/summary` (placeholder). See [the integration details](docs/claude-integration.md) and [page boundaries](docs/page-handoff.md).
+The only routes remain `/` (applicant dashboard), `/processor`, and `/summary`. See [the integration details](docs/claude-integration.md) and [page boundaries](docs/page-handoff.md).
 
 Read [AGENTS.md](AGENTS.md), the relevant skill in [.agents/skills](.agents/skills), and [the Claude integration boundary](docs/claude-integration.md). The analysis provider is in `frontend/app/services/analysis.ts`; fixtures and state are separate from the screen.
 
@@ -83,9 +83,9 @@ Original referral packets, their contents, generated patient screenshots, creden
 
 - `/`: referral intake dashboard: summary counts, search, status/priority filters, sorting, inline review status (Open, In review, Needs info, Approved, Denied — set manually by the coordinator), and a 2-hour review countdown from the received time. **Add applicant** uploads one combined referral PDF, which the server stores (see below). Opening an *Open* referral marks it *In review*.
 - `/processor`: the existing PDF → information nodes → checklist workspace.
-- `/summary`: placeholder summary, items needing attention, and recommended changes.
+- `/summary`: the active applicant's recommendation (from the decision model, else the staged decision tree over the checklist), discrepancies and gaps, required documents DOC-1–DOC-10, and criteria by decision-tree stage. Clicking any item opens its cited page in the PDF beside it, with the located passage highlighted. Read-only: the coordinator decides.
 
-Use **Continue to summary** to demonstrate the flow. Uploading a PDF in the processor starts Claude analysis; there is no summary generation yet. Uploaded applicants and their PDFs persist on the server. Review edits remain in memory across route navigation and reset on reload. Page ownership and shared contracts are documented in [the page handoff](docs/page-handoff.md).
+Use **Continue to summary** to demonstrate the flow. Uploading a PDF in the processor starts Claude analysis. **Add applicant** on the dashboard starts it automatically in the background (one at a time, while the tab stays open); the result is saved with the applicant, so reopening it never re-runs Claude. **Analyze again** in the processor overwrites the saved result. Results are not cached when Google Drive storage is used. Uploaded applicants and their PDFs persist on the server. Review edits remain in memory across route navigation and reset on reload. Page ownership and shared contracts are documented in [the page handoff](docs/page-handoff.md).
 
 ## Packet storage
 
@@ -97,9 +97,11 @@ Use **Continue to summary** to demonstrate the flow. Uploading a PDF in the proc
 | `POST /api/applicants` | Multipart `name` + `file`; stores the PDF |
 | `GET /api/applicants/:id/pdf` | Stream the stored PDF to the processor preview |
 | `PATCH /api/applicants/:id` | Update intake details or review status (JSON) |
+| `POST /api/applicants/:id/analyze` | Run Claude on the stored PDF (streamed like `/api/analyze`) and save the result |
+| `GET /api/applicants/:id/analysis` | The saved analysis result |
 | `DELETE /api/applicants/:id` | Delete (local/R2) or move to Drive trash |
 
-**On Cloudflare (the deployed site): R2.** `nuxt.config.ts` declares the R2 bucket `referralready` as the binding `REFERRAL_PACKETS`; Cloudflare's build turns that into the deployed Worker config, so no dashboard binding is needed. PDFs are stored at `packets/<id>.pdf` and applicant details in a single `index.json`. Uploads are refused once stored PDFs would exceed `NUXT_STORAGE_LIMIT_GB` (default 9 GB, under R2's 10 GB free tier). Protect the site with Cloudflare Access before storing real referrals: these routes have no login of their own.
+**On Cloudflare (the deployed site): R2.** `nuxt.config.ts` declares the R2 bucket `referralready` as the binding `REFERRAL_PACKETS`; Cloudflare's build turns that into the deployed Worker config, so no dashboard binding is needed. PDFs are stored at `packets/<id>.pdf`, saved analyses at `analyses/<id>.json`, and applicant details (with a short analysis summary) in a single `index.json`. Uploads are refused once stored PDFs would exceed `NUXT_STORAGE_LIMIT_GB` (default 9 GB, under R2's 10 GB free tier). Protect the site with Cloudflare Access before storing real referrals: these routes have no login of their own.
 
 To test the Cloudflare build locally with a simulated bucket:
 
