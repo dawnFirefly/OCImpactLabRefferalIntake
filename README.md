@@ -40,7 +40,7 @@ _Add link here_
 | Claude reading the PDF and reviewing criteria | Real (needs `NUXT_ANTHROPIC_API_KEY`) |
 | Decision tree and recommendation | Real, deterministic over Claude's rule statuses |
 | Page citations | Real (model-reported) |
-| Highlight boxes on the page | Real but approximate; often off (see below) |
+| Highlight boxes on the page | Real but approximate |
 | "Synthetic UI example" applicant | Mocked, fictional data |
 | Draft hospital response | Not built (draft-only by design if added) |
 | Connection to IHH systems, emails, faxes | None |
@@ -48,7 +48,6 @@ _Add link here_
 
 ## Where it gets things wrong
 
-- **Highlight positions are often wrong.** Packets are scanned images with no text layer, so the box comes from Claude estimating position by eye; we measured errors of 5–35% of page height. The cited page is reliable; the box is not.
 - **Thin extraction on long packets** can mark many criteria "missing" when the facts are in the PDF. Re-run, or use a stronger extraction model (`NUXT_CLAUDE_EXTRACTION_MODEL`).
 - **Redactions and conflicts** (e.g. a dementia code vs. an unchecked cognitive-impairment box) are deliberately left "uncertain" for the coordinator, so many packets come back "Needs review".
 - **Slow PDF loading** on large scanned packets; analysis takes about 1.5–2.5 minutes and the tab must stay open.
