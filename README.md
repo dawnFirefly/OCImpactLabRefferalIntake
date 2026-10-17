@@ -53,3 +53,11 @@ npm run build
 Read [AGENTS.md](AGENTS.md), the relevant skill in [.agents/skills](.agents/skills), and [the Claude integration boundary](docs/claude-integration.md). The future provider interface is in `frontend/app/services/analysis.ts`; fixtures and state are separate from the screen.
 
 Original referral packets, their contents, generated patient screenshots, credentials, and build output must stay out of Git. The supplied PDFs are external examples and are not included here.
+
+## Three-page scaffold
+
+- `/`: applicant dashboard with local applicant creation and selection.
+- `/processor`: the existing PDF → information nodes → checklist workspace.
+- `/summary`: placeholder summary, items needing attention, and recommended changes.
+
+Use **Continue to summary** to demonstrate the flow. There is no automatic analysis completion or summary generation yet. Applicant records, PDF object URLs, and review edits remain in memory across route navigation and reset on reload. Page ownership and shared contracts are documented in [the page handoff](docs/page-handoff.md).

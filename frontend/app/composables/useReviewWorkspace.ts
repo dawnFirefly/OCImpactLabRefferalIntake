@@ -6,6 +6,7 @@ import { createDemoPdf } from "../lib/demoPdf";
 /** Frontend-only session state. No extraction, model requests, or PDF text extraction. */
 export function useReviewWorkspace() {
   const referral = ref<Referral>(createDemo());
+  const applicants = ref<Referral[]>([]);
   const error = ref("");
   const attachedFiles = shallowRef<File[]>([]);
   const mode = ref<"synthetic" | "provided" | "attached">("synthetic");
@@ -20,19 +21,42 @@ export function useReviewWorkspace() {
       objectUrls.push(url);
     }
   }
+  function rememberApplicant() {
+    const index = applicants.value.findIndex((a) => a.id === referral.value.id);
+    if (index === -1) applicants.value.push(referral.value);
+    else applicants.value[index] = referral.value;
+  }
+  function selectApplicant(id: string) {
+    const applicant = applicants.value.find((a) => a.id === id);
+    if (!applicant) return;
+    referral.value = applicant;
+    mode.value = id === "synthetic-demo" ? "synthetic" : id.startsWith("provided-") ? "provided" : "attached";
+    error.value = "";
+  }
+  function addApplicant(name: string) {
+    referral.value = {
+      id: crypto.randomUUID(), title: name.trim(), status: "awaiting_pdf", revision: 0,
+      documents: [], facts: [], evidence: [], error: null, audit: [],
+      checklist: { precedence: "", source_url: "", rules: [], counts: {} },
+    };
+    mode.value = "attached";
+    rememberApplicant();
+    return referral.value.id;
+  }
   function resetDemo() {
-    objectUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
     attachedFiles.value = [];
     referral.value = createDemo();
     installDemoPreviews();
     error.value = "";
     mode.value = "synthetic";
+    rememberApplicant();
   }
   function useProvidedDocument(document: PacketDocument) {
-    objectUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
     attachedFiles.value = [];
     mode.value = "provided";
     error.value = "";
+    const existing = applicants.value.find((a) => a.id === document.id);
+    if (existing) { referral.value = existing; return; }
     // Every supplied packet is a separate referral, never one combined patient.
     referral.value = document.id === "provided-R01" ? createR01Mock(document) : {
       id: document.id,
@@ -46,6 +70,7 @@ export function useReviewWorkspace() {
       audit: [],
       checklist: { precedence: "", source_url: "", rules: [], counts: {} },
     };
+    rememberApplicant();
   }
   async function loadProvidedDocuments() {
     try {
@@ -68,8 +93,8 @@ export function useReviewWorkspace() {
           error: null,
           pages: [],
         }));
-      if (providedDocuments.value[0])
-        useProvidedDocument(providedDocuments.value[0]);
+      for (const doc of providedDocuments.value) useProvidedDocument(doc);
+      if (providedDocuments.value[0]) selectApplicant(providedDocuments.value[0].id);
     } catch {
       /* No local examples configured; retain the synthetic flow. */
     }
@@ -90,13 +115,12 @@ export function useReviewWorkspace() {
       error.value = "Choose one combined PDF per applicant. Switch applicants to review another packet.";
       return;
     }
-    objectUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
     error.value = "";
     attachedFiles.value = list;
     mode.value = "attached";
     referral.value = {
-      id: crypto.randomUUID(),
-      title: "Attached referral",
+      id: referral.value.status === "awaiting_pdf" ? referral.value.id : crypto.randomUUID(),
+      title: referral.value.status === "awaiting_pdf" ? referral.value.title : list[0]!.name,
       status: "awaiting_claude",
       revision: 0,
       documents: list.map((f) => {
@@ -118,6 +142,7 @@ export function useReviewWorkspace() {
       audit: [],
       checklist: { precedence: "", source_url: "", rules: [], counts: {} },
     } as Referral;
+    rememberApplicant();
   }
   function updateFact(fact: Fact, value: string, note: string, status: string) {
     const current = referral.value.facts.find((f) => f.id === fact.id);
@@ -149,10 +174,14 @@ export function useReviewWorkspace() {
   onBeforeUnmount(() => objectUrls.forEach((url) => URL.revokeObjectURL(url)));
   onMounted(() => {
     installDemoPreviews();
+    rememberApplicant();
     loadProvidedDocuments();
   });
   return {
     referral,
+    applicants,
+    selectApplicant,
+    addApplicant,
     error,
     attachedFiles,
     resetDemo,

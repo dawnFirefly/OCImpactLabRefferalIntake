@@ -6,7 +6,7 @@ This repository currently contains **a frontend scaffold only**. The user explic
 
 - Keep the minimal three-section workspace: one applicant PDF on the left, connected patient-information nodes in the middle, result checklist on the right.
 - Use Vue 3 / Nuxt 4 and actual shadcn-vue components. Vue Flow owns graph layout, pan, zoom, and source-to-fact edges.
-- Do not add a dashboard, navigation shell, admission workflow, authentication, or a Python backend unless the next user task asks for it.
+- The user authorized three routes only: applicant dashboard, existing decision processor, and placeholder summary. Keep the dashboard/summary skeletal; do not add authentication, admission automation, or a Python backend.
 - Do not implement or install local OCR, Tesseract, PDF text extraction, or image-based extraction. Do not extract the supplied packets as part of frontend work.
 - Do not mistake mock fixtures for analysis. Files attached in the current UI are browser-local and await a future Claude integration.
 
@@ -24,7 +24,13 @@ Before delivery: `npm run typecheck` and `npm run build` from `frontend/`. For U
 
 ## Architecture
 
-- `frontend/app/app.vue`: three panels, graph slots, checklist, review dialog, browser PDF preview.
+- `frontend/app/app.vue`: root session provider and Nuxt router outlet.
+- `frontend/app/layouts/default.vue`: lightweight shared navigation.
+- `frontend/app/pages/index.vue`: applicant dashboard skeleton and session-local creation.
+- `frontend/app/pages/processor.vue`: processor route and summary continuation.
+- `frontend/app/components/DecisionProcessor.vue`: existing three panels, graph, checklist, review dialog, browser PDF preview.
+- `frontend/app/pages/summary.vue`: placeholder sections only; no decision generation.
+- `docs/page-handoff.md`: page ownership boundaries and shared state contract.
 - `frontend/app/composables/useReviewWorkspace.ts`: session-local attachment and review state.
 - `frontend/app/data/demo.ts`: explicitly synthetic fixtures, separate from real packets.
 - `frontend/app/types.ts`: the graph/evidence/checklist result contract.

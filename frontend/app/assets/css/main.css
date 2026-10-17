@@ -672,3 +672,34 @@ h2 {
     transition: none !important;
   }
 }
+
+/* Shared route shell. Each page owns its body; keep navigation lightweight. */
+.app-nav { min-height: 64px; display: flex; align-items: center; gap: 32px; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--card); }
+.brand { font-weight: 650; text-decoration: none; font-size: 16px; }
+.app-nav nav { display: flex; gap: 22px; }
+.app-nav nav a { text-decoration: none; color: #788574; padding: 8px 0; }
+.app-nav nav a.current { color: var(--foreground); border-bottom: 2px solid var(--primary); }
+.active-applicant { margin-left: auto; color: #788574; font-size: 12px; }
+.app-shell .workspace { height: calc(100dvh - 130px); min-height: 620px; }
+.skeleton-page { max-width: 1080px; margin: 0 auto; padding: 48px 24px; }
+.page-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 32px; }
+.skeleton-page h1 { font-size: 28px; font-weight: 600; margin: 10px 0; }
+.skeleton-page h2 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+.skeleton-page p { color: #788574; line-height: 1.6; }
+.skeleton-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+.applicant-list, .summary-sections { display: grid; gap: 16px; }
+.applicant-card { display: flex; gap: 24px; align-items: center; }
+.applicant-card > div { flex: 1; }
+.status-label { color: #697c66; background: #edf2eb; padding: 6px 10px; border-radius: 6px; font-size: 12px; }
+.add-applicant { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.add-applicant input { border: 1px solid var(--border); padding: 10px; border-radius: 6px; flex: 1; min-width: 180px; }
+.skeleton-note { margin-top: 24px; font-size: 12px; }
+.page-actions { display: flex; gap: 12px; margin-top: 28px; }
+.processor-next { display: flex; justify-content: flex-end; align-items: center; gap: 20px; padding: 0 24px 16px; color: #788574; }
+@media (max-width: 850px) {
+  .app-nav { flex-wrap: wrap; gap: 12px 24px; }
+  .active-applicant { display: none; }
+  .app-shell .workspace { height: auto; min-height: 0; }
+  .applicant-card, .page-heading { align-items: flex-start; flex-wrap: wrap; }
+  .processor-next { flex-wrap: wrap; }
+}

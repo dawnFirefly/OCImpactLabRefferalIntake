@@ -5,9 +5,11 @@ description: Extend or repair ReferralReady's minimal Nuxt frontend, patient-inf
 
 # Referral frontend
 
-Read root `AGENTS.md` for the current scope. The accepted direction is three visible sections: one applicant PDF, information nodes, checklist. Avoid expanding it into a complete website.
+Read root `AGENTS.md` for the current scope. The accepted direction is three visible sections: one applicant PDF, information nodes, checklist. The user also authorized a simple applicant dashboard and placeholder summary around this processor. Keep those pages skeletal.
 
-Use `frontend/app/app.vue` for the composition and graph slots, `useReviewWorkspace.ts` for session state, and `data/demo.ts` for fictional fixtures. Prefer extracting focused Vue components as the screen grows rather than adding service logic to the template.
+Use `frontend/app/components/DecisionProcessor.vue` for the composition and graph slots, `useReviewWorkspace.ts` for root-provided session state, and `data/demo.ts` for fictional fixtures. Prefer extracting focused Vue components as the screen grows rather than adding service logic to the template.
+
+See `docs/page-handoff.md` for route ownership and the shared session interface.
 
 ## Graph invariants
 
@@ -19,7 +21,7 @@ Use `frontend/app/app.vue` for the composition and graph slots, `useReviewWorksp
 
 ## State and interaction
 
-Use shadcn-vue's source-owned controls in `app/components/ui/` and the existing ReKa-backed Dialog. Attached PDFs are object URLs and are rendered by `PdfSourceViewer.client.vue`, without uploads, OCR, or text extraction. Revoke object URLs on reset/unmount. Display the pending Claude state honestly.
+Use shadcn-vue's source-owned controls in `app/components/ui/` and the existing ReKa-backed Dialog. Attached PDFs are object URLs and are rendered by `PdfSourceViewer.client.vue`, without uploads, OCR, or text extraction. Retain object URLs while navigating between applicants/pages; revoke on root unmount. Display the pending Claude state honestly.
 
 PDF previews use the bundled PDF.js worker. Use document/page/bbox evidence anchors for highlights, not a text-search guess. Synthetic PDFs are generated from fixtures in `lib/demoPdf.ts` and their authored anchors in `data/demo.ts`. Keep those two coordinated. A null anchor displays a page-only preview. Changing source/page or resizing must keep the overlay aligned and cancel superseded renders.
 
