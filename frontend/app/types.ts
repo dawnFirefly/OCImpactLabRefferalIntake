@@ -63,6 +63,13 @@ export type PacketDocument = {
   storage?: StoredPacket;
 };
 export type ReviewStatus = "new" | "in_review" | "needs_info" | "approved" | "denied";
+/** Summary of a saved Claude analysis (full result is fetched from /api/applicants/:id/analysis). */
+export type AnalysisMeta = {
+  analyzedAt: string;
+  outcome: Recommendation["outcome"] | null;
+  stage: number | null;
+  recommendation: Recommendation["status"] | null;
+};
 /** Coordinator-entered intake details for a stored applicant (not model output). */
 export type Intake = {
   receivedAt: string;
@@ -74,6 +81,8 @@ export type Intake = {
   reviewStatus: ReviewStatus;
   uploadedAt: string;
   size: number;
+  /** Set once an analysis has been saved for this applicant. */
+  analysis?: AnalysisMeta;
 };
 export type Referral = {
   sections?: DocumentSection[];

@@ -2,7 +2,7 @@ import { claudeProvider, type AnalysisProgress, type AnalysisPreview } from "../
 import { uploadPacket } from "../services/storage";
 import { createR01Mock } from "../data/r01Mock";
 import { createDemo } from "../data/demo";
-import type { Referral, Fact, Rule, PacketDocument, Intake } from "../types";
+import type { Referral, Fact, Rule, PacketDocument, Intake, AnalysisMeta } from "../types";
 import { createDemoPdf } from "../lib/demoPdf";
 import { criteriaPrecedence, criteriaSource, unreviewedRules } from "#shared/decision-tree";
 import { maxPacketBytes } from "#shared/upload-limits";
@@ -17,7 +17,7 @@ export type StoredPacket = Intake & {
   id: string;
   name: string;
   fileName: string;
-  storage: "local" | "google_drive";
+  storage: "local" | "google_drive" | "r2";
 };
 /** Editable intake fields sent to the server on create/update. */
 export type IntakeInput = Partial<Pick<StoredPacket, "name" | "receivedAt" | "source" | "contact" | "priority" | "reviewer" | "notes" | "reviewStatus">>;
@@ -120,19 +120,34 @@ export function useReviewWorkspace() {
     const name = patientName.value.trim();
     error.value = "";
     if (name) namesByApplicant.set(current.id, name);
+    if (backgroundIds.value.has(current.id)) return;
     analyzing.value = true;
     const request = new AbortController();
     controller = request;
     try {
-      const file = await sourceFile(current, request.signal);
-      startPreview(current, name || current.title);
-      const result = await claudeProvider.analyze(file, name, {
-        onProgress: (update) => { if (controller === request) progress.value = update; },
-        onPreview: (event) => { if (controller === request) applyPreview(event); },
-      }, request.signal);
+      const handlers = {
+        onProgress: (update: AnalysisProgress) => { if (controller === request) progress.value = update; },
+        onPreview: (event: AnalysisPreview) => { if (controller === request) applyPreview(event); },
+      };
+      let result: Referral;
+      if (isStored(current)) {
+        // The server reads the stored PDF and saves the result with the applicant.
+        startPreview(current, name || current.title);
+        result = await claudeProvider.analyzeStored(packetId(current.id), name, handlers, request.signal);
+      } else {
+        const file = await sourceFile(current, request.signal);
+        startPreview(current, name || current.title);
+        result = await claudeProvider.analyze(file, name, handlers, request.signal);
+      }
       if (request.signal.aborted || referral.value.id !== current.id) return;
       beforeAnalysis = null;
+      if (isStored(current)) {
+        referral.value = current; // leave the provisional preview before swapping in the saved result
+        applyStoredResult(current, result);
+        return;
+      }
       result.id = current.id;
+      // Keep coordinator intake details (received time, status) for stored applicants.
       result.intake = current.intake;
       if (current.intake) result.title = current.title;
       result.documents[0]!.local_url = current.documents[0]?.local_url;
@@ -173,6 +188,7 @@ export function useReviewWorkspace() {
     patientName.value = namesByApplicant.get(id) || (applicant.status === "analyzed" || applicant.status === "awaiting_pdf" ? applicant.title : "");
     mode.value = id === "synthetic-demo" ? "synthetic" : id.startsWith("provided-") ? "provided" : "attached";
     error.value = "";
+    loadStoredAnalysis(applicant).catch(() => { error.value = "The saved analysis could not be loaded. Analyze again to refresh it."; });
   }
   function addApplicant(name: string) {
     cancelAnalysis();
@@ -186,6 +202,70 @@ export function useReviewWorkspace() {
     namesByApplicant.set(referral.value.id, name.trim());
     rememberApplicant();
     return referral.value.id;
+  }
+  // ── Stored applicants: background analysis and saved results ───────────────
+  const isStored = (r: Referral) => r.id.startsWith("stored-");
+  const packetId = (id: string) => id.replace(/^stored-/, "");
+  /** Applicants being analyzed in the background, and the last background error per applicant. */
+  const backgroundIds = ref(new Set<string>());
+  const backgroundErrors = ref(new Map<string, string>());
+  const queue: string[] = [];
+  let queueRunning = false;
+  function analysisMeta(result: Referral): AnalysisMeta {
+    const rec = result.recommendation;
+    return { analyzedAt: new Date().toISOString(), outcome: rec?.outcome ?? null, stage: rec?.stage ?? null, recommendation: rec?.status ?? null };
+  }
+  /** Swap a stored applicant's record for its analyzed result, keeping its name, intake and PDF link. */
+  function applyStoredResult(record: Referral, result: Referral, meta = analysisMeta(result)) {
+    result.id = record.id;
+    result.title = record.title;
+    result.intake = record.intake ? { ...record.intake, analysis: meta } : undefined;
+    if (result.documents[0]) result.documents[0].local_url = record.documents[0]?.local_url;
+    const index = applicants.value.findIndex((a) => a.id === record.id);
+    if (index !== -1) applicants.value[index] = result;
+    if (referral.value.id === record.id && referral.value.status !== "analyzing") referral.value = result;
+    return result;
+  }
+  /** Load a saved analysis instead of re-running Claude. */
+  async function loadStoredAnalysis(record: Referral) {
+    if (!isStored(record) || record.status === "analyzed" || !record.intake?.analysis) return;
+    const result = await $fetch<Referral>(`/api/applicants/${encodeURIComponent(packetId(record.id))}/analysis`);
+    const latest = applicants.value.find((a) => a.id === record.id);
+    if (latest && latest.status !== "analyzed") applyStoredResult(latest, result, record.intake.analysis);
+  }
+  /** Queue a stored applicant for analysis; runs one at a time (the server allows one analysis). */
+  function analyzeInBackground(id: string) {
+    if (!queue.includes(id) && !backgroundIds.value.has(id)) queue.push(id);
+    void runQueue();
+  }
+  async function runQueue() {
+    if (queueRunning) return;
+    queueRunning = true;
+    try {
+      while (queue.length) {
+        const id = queue.shift()!;
+        const record = applicants.value.find((a) => a.id === id);
+        if (!record || record.status === "analyzed") continue;
+        while (analyzing.value) await new Promise((resolve) => setTimeout(resolve, 1000));
+        backgroundIds.value = new Set(backgroundIds.value).add(id);
+        const errors = new Map(backgroundErrors.value);
+        errors.delete(id);
+        backgroundErrors.value = errors;
+        try {
+          const result = await claudeProvider.analyzeStored(packetId(id), "", { onProgress() {}, onPreview() {} });
+          const latest = applicants.value.find((a) => a.id === id);
+          if (latest) applyStoredResult(latest, result);
+        } catch (failure) {
+          backgroundErrors.value = new Map(backgroundErrors.value).set(id, failure instanceof Error ? failure.message : "Analysis failed.");
+        } finally {
+          const running = new Set(backgroundIds.value);
+          running.delete(id);
+          backgroundIds.value = running;
+        }
+      }
+    } finally {
+      queueRunning = false;
+    }
   }
   function storedReferral(packet: StoredPacket): Referral {
     const { id, name, fileName, storage, ...intake } = packet;
@@ -216,6 +296,8 @@ export function useReviewWorkspace() {
     const record = storedReferral(packet);
     applicants.value.push(record);
     filesByApplicant.set(record.id, file);
+    // New referrals are analyzed right away; the result is saved with the applicant.
+    analyzeInBackground(record.id);
     return record;
   }
   /** Saves intake/status edits, keeping the in-session review (facts, checklist, audit) intact. */
@@ -406,6 +488,9 @@ export function useReviewWorkspace() {
     addApplicant,
     loadStoredApplicants,
     createStoredApplicant,
+    analyzeInBackground,
+    backgroundIds,
+    backgroundErrors,
     updateStoredApplicant,
     deleteStoredApplicant,
     error,

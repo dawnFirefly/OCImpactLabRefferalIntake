@@ -18,6 +18,15 @@ export type IntakeFields = {
   reviewStatus: (typeof REVIEW_STATUSES)[number];
 };
 
+/** Short record of the saved Claude analysis, kept in the applicant list for the dashboard. */
+export type AnalysisMeta = {
+  analyzedAt: string;
+  /** Decision-tree outcome and recommendation status, copied from the saved result. */
+  outcome: string | null;
+  stage: number | null;
+  recommendation: string | null;
+};
+
 /** Stored applicant packet: one applicant, one combined referral PDF. */
 export type StoredPacket = IntakeFields & {
   id: string;
@@ -25,6 +34,7 @@ export type StoredPacket = IntakeFields & {
   size: number;
   uploadedAt: string;
   storage: "local" | "google_drive" | "r2";
+  analysis?: AnalysisMeta;
 };
 
 type PacketStore = {
@@ -34,6 +44,9 @@ type PacketStore = {
   /** PDF bytes, or a stream for stores that support it (R2). */
   read(id: string): Promise<Buffer | ReadableStream | null>;
   remove(id: string): Promise<boolean>;
+  /** Saved analysis result (JSON); null when the store has none or cannot cache results. */
+  readAnalysis(id: string): Promise<string | null>;
+  saveAnalysis(id: string, json: string, meta: AnalysisMeta): Promise<boolean>;
 };
 
 const LIMITS: Record<Exclude<keyof IntakeFields, "priority" | "reviewStatus">, number> = {
@@ -89,6 +102,7 @@ export const MAX_PACKET_BYTES = 50 * 1024 * 1024;
 function localStore(): PacketStore {
   const root = resolve(process.cwd(), ".data/referrals");
   const files = join(root, "files");
+  const analyses = join(root, "analyses");
   const indexPath = join(root, "index.json");
   const safeId = (id: string) => /^[0-9a-f-]{36}$/.test(id);
   async function load(): Promise<StoredPacket[]> {
@@ -132,7 +146,27 @@ function localStore(): PacketStore {
       const entries = await load();
       if (!entries.some((e) => e.id === id)) return false;
       await rm(join(files, `${id}.pdf`), { force: true });
+      await rm(join(analyses, `${id}.json`), { force: true });
       await persist(entries.filter((e) => e.id !== id));
+      return true;
+    },
+    async readAnalysis(id) {
+      if (!safeId(id)) return null;
+      try {
+        return await readFile(join(analyses, `${id}.json`), "utf8");
+      } catch {
+        return null;
+      }
+    },
+    async saveAnalysis(id, json, meta) {
+      if (!safeId(id)) return false;
+      const entries = await load();
+      const entry = entries.find((e) => e.id === id);
+      if (!entry) return false;
+      await mkdir(analyses, { recursive: true });
+      await writeFile(join(analyses, `${id}.json`), json);
+      entry.analysis = meta;
+      await persist(entries);
       return true;
     },
   };
@@ -268,6 +302,13 @@ function driveStore(config: DriveConfig): PacketStore {
       });
       return res.ok;
     },
+    // Analysis results are not cached in Drive; coordinators re-run analysis instead.
+    async readAnalysis() {
+      return null;
+    },
+    async saveAnalysis() {
+      return false;
+    },
   };
 }
 
@@ -288,6 +329,7 @@ type R2Bucket = {
 function r2Store(bucket: R2Bucket): PacketStore {
   const INDEX = "index.json";
   const fileKey = (id: string) => `packets/${id}.pdf`;
+  const analysisKey = (id: string) => `analyses/${id}.json`;
   const safeId = (id: string) => /^[0-9a-f-]{36}$/.test(id);
   async function load() {
     const object = await bucket.get(INDEX);
@@ -337,8 +379,21 @@ function r2Store(bucket: R2Bucket): PacketStore {
         if (index !== -1) entries.splice(index, 1);
         return index !== -1;
       });
-      if (removed) await bucket.delete(fileKey(id));
+      if (removed) await Promise.all([bucket.delete(fileKey(id)), bucket.delete(analysisKey(id))]);
       return removed;
+    },
+    async readAnalysis(id) {
+      if (!safeId(id)) return null;
+      return (await (await bucket.get(analysisKey(id)))?.text()) ?? null;
+    },
+    async saveAnalysis(id, json, meta) {
+      if (!safeId(id)) return false;
+      await bucket.put(analysisKey(id), json, { httpMetadata: { contentType: "application/json" } });
+      return change((entries) => {
+        const entry = entries.find((e) => e.id === id);
+        if (entry) entry.analysis = meta;
+        return !!entry;
+      });
     },
   };
 }

@@ -62,8 +62,9 @@ a:focus-visible {
 button:disabled {
   opacity: 0.55;
 }
-a {
-  color: #4e7855;
+/* Layered so link-styled buttons (as-child NuxtLink) keep their own text colour. */
+@layer base {
+  a { color: #4e7855; }
 }
 .mono {
   font-variant-numeric: tabular-nums;

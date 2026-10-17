@@ -11,47 +11,62 @@ export type AnalysisPreview =
   | { type: "rule"; rule: Pick<Rule, "id" | "status" | "fact_ids" | "note"> }
   | { type: "reset"; stage: "extracting" | "reviewing" };
 
+type Handlers = {
+  onProgress: (progress: AnalysisProgress) => void;
+  onPreview: (preview: AnalysisPreview) => void;
+};
 export interface AnalysisProvider {
-  analyze(file: File, patientName: string, handlers: {
-    onProgress: (progress: AnalysisProgress) => void;
-    onPreview: (preview: AnalysisPreview) => void;
-  }, signal?: AbortSignal): Promise<Referral>;
+  analyze(file: File, patientName: string, handlers: Handlers, signal?: AbortSignal): Promise<Referral>;
+  /** Stored applicant: the server reads the PDF from storage and saves the validated result. */
+  analyzeStored(packetId: string, patientName: string, handlers: Handlers, signal?: AbortSignal): Promise<Referral>;
 }
 
 type StreamEvent =
   | ({ type: "progress" } & AnalysisProgress)
   | AnalysisPreview
-  | { type: "result"; referral: Referral }
+  | { type: "result"; referral: Referral; saved?: boolean }
   | { type: "error"; message: string };
 
 /** Reads the server's newline-delimited event stream; only a final `result` is authoritative. */
+async function readAnalysisStream(response: Response, { onProgress, onPreview }: Handlers): Promise<Referral> {
+  if (!response.ok || !response.body) {
+    const failure = await response.json().catch(() => ({}));
+    throw new Error(failure.statusMessage || "Analysis failed. Please try again.");
+  }
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffer += value || "";
+    const lines = buffer.split("\n");
+    buffer = done ? "" : lines.pop()!;
+    for (const line of lines.filter(l => l.trim())) {
+      const event = JSON.parse(line) as StreamEvent;
+      if (event.type === "progress") onProgress(event);
+      else if (event.type === "error") throw new Error(event.message);
+      else if (event.type === "result") return event.referral;
+      else onPreview(event);
+    }
+    if (done) throw new Error("The analysis connection closed before a result arrived. Please retry.");
+  }
+}
+
 export const claudeProvider: AnalysisProvider = {
   async analyze(file, patientName, { onProgress, onPreview }, signal) {
     if (file.size > maxPacketBytes) throw new Error("Choose a PDF up to 50 MB.");
-    // Raw PDF bytes; metadata in headers so the server skips multipart parsing.
+    // Raw PDF bytes; metadata in headers so the server skips multipart parsing (Worker CPU budget).
     const headers: Record<string, string> = { "content-type": "application/pdf", "x-file-name": encodeURIComponent(file.name) };
     if (patientName.trim()) headers["x-patient-name"] = encodeURIComponent(patientName.trim());
-    onProgress({ stage: "uploading", message: "Sending the PDF to the local analysis server…" });
+    onProgress({ stage: "uploading", message: "Uploading the PDF…" });
     const response = await fetch("/api/analyze", { method: "POST", body: file, headers, signal });
-    if (!response.ok || !response.body) {
-      const failure = await response.json().catch(() => ({}));
-      throw new Error(failure.statusMessage || "Analysis failed. Please try again.");
-    }
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffer = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      buffer += value || "";
-      const lines = buffer.split("\n");
-      buffer = done ? "" : lines.pop()!;
-      for (const line of lines.filter(l => l.trim())) {
-        const event = JSON.parse(line) as StreamEvent;
-        if (event.type === "progress") onProgress(event);
-        else if (event.type === "error") throw new Error(event.message);
-        else if (event.type === "result") return event.referral;
-        else onPreview(event);
-      }
-      if (done) throw new Error("The analysis connection closed before a result arrived. Please retry.");
-    }
+    return readAnalysisStream(response, { onProgress, onPreview });
+  },
+  async analyzeStored(packetId, patientName, handlers, signal) {
+    handlers.onProgress({ stage: "extracting", message: "Starting analysis of the stored PDF…" });
+    const response = await fetch(`/api/applicants/${encodeURIComponent(packetId)}/analyze`, {
+      method: "POST", signal, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patientName: patientName.trim() }),
+    });
+    return readAnalysisStream(response, handlers);
   },
 };
