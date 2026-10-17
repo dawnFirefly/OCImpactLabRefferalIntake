@@ -22,6 +22,7 @@ export default defineNuxtConfig({
     cloudflareAccessTeamDomain: "",
     cloudflareAccessAudience: "",
     workspaceAllowedEmails: "",
+    workspacePublicAccess: "",
     googleDrive: { clientId: "", clientSecret: "", refreshToken: "", folderId: "" },
     storageLimitGb: 9,
     // Pass 1 reads the PDF and locates facts; pass 2 links facts to admission criteria.

@@ -267,6 +267,8 @@ export function useReviewWorkspace() {
     rememberApplicant();
   }
   async function loadProvidedDocuments() {
+    // Local packet previews exist only in local development; deployed builds exclude them.
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) return;
     try {
       const response = await fetch("/local-demo/manifest.json");
       if (!response.ok) return;

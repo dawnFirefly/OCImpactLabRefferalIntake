@@ -38,3 +38,12 @@ test("remote access requires the correct signature, issuer, audience, expiry and
   const forged = await new SignJWT({ email: "reviewer@example.test" }).setProtectedHeader({ alg: "RS256", kid: "test" }).sign(other.privateKey);
   await assert.rejects(checkWorkspaceAccess({ ...remote, token: forged }, config, keys), (error: any) => error.statusCode === 401);
 });
+
+test("temporary public access skips only the sign-in check, never the origin or hostname checks", async () => {
+  const config = { workspaceOrigin: "https://app.example.com", cloudflareAccessTeamDomain: "", cloudflareAccessAudience: "", workspaceAllowedEmails: "", workspacePublicAccess: "true" };
+  const url = new URL("https://app.example.com/api/analyze");
+  await checkWorkspaceAccess({ url, origin: url.origin }, config);
+  await assert.rejects(checkWorkspaceAccess({ url, origin: "https://evil.example" }, config), /own page/);
+  const other = new URL("https://other.example.com/api/analyze");
+  await assert.rejects(checkWorkspaceAccess({ url: other, origin: other.origin }, config), /not enabled/);
+});

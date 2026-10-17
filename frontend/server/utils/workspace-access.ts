@@ -6,6 +6,8 @@ type AccessConfig = {
   cloudflareAccessTeamDomain: string;
   cloudflareAccessAudience: string;
   workspaceAllowedEmails: string;
+  /** TEMPORARY: "true" skips the Cloudflare Access sign-in check. Origin and hostname checks still apply. */
+  workspacePublicAccess?: string | boolean;
 };
 const keySets = new Map<string, JWTVerifyGetKey>();
 
@@ -23,6 +25,9 @@ export async function checkWorkspaceAccess(
   if (url.protocol !== "https:" || !config.workspaceOrigin || url.origin !== config.workspaceOrigin) {
     throw createError({ statusCode: 403, statusMessage: "This workspace hostname is not enabled." });
   }
+  // Temporary opening requested by the user while Cloudflare Access is not set up. Turn off by
+  // removing NUXT_WORKSPACE_PUBLIC_ACCESS: anyone with the URL can upload PDFs and run paid analysis.
+  if (String(config.workspacePublicAccess) === "true") return;
   const domain = config.cloudflareAccessTeamDomain;
   const emails = config.workspaceAllowedEmails.split(",").map(email => email.trim().toLowerCase()).filter(Boolean);
   if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.cloudflareaccess\.com$/.test(domain) ||

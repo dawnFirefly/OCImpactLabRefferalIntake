@@ -312,13 +312,27 @@ function drawOutputs() {
 watch([group, selectedDoc], () => {
   graphPage.value = 0;
 });
+// Wait for Vue Flow to measure new cards before moving the camera.
+let pendingFocusNode: string | undefined;
+function frameInitializedNodes() {
+  if (pendingFocusNode) {
+    const id = pendingFocusNode;
+    pendingFocusNode = undefined;
+    fitView({ nodes: [id], padding: 0.35, maxZoom: 1, duration: 650 });
+  } else {
+    fitView({ padding: 0.22, maxZoom: 1, duration: 650 });
+  }
+}
 watch(
-  () => visibleFacts.value.map((f) => f.id).join(","),
-  () =>
-    nextTick(() => {
-      fitView({ padding: 0.22, maxZoom: 1, duration: 150 });
-      setTimeout(drawOutputs, 180);
-    }),
+  () => graphNodes.value.map((node) => node.id),
+  (ids, previousIds) => {
+    const added = ids.filter((id) => !previousIds.includes(id));
+    // A different packet starts with an overview; additions focus the newest card.
+    const samePacket = ids[0] === previousIds[0];
+    pendingFocusNode = samePacket ? added.at(-1) : undefined;
+    if (!added.length) nextTick(frameInitializedNodes);
+  },
+  { flush: "pre" },
 );
 watch(() => referral.value.id, () => { selectedFact.value = null; selectedDoc.value = null; review.value = null; group.value = "All factors"; graphPage.value = 0; });
 // Reopening/closing the review resizes the graph column; refit once the grid transition settles.
@@ -483,7 +497,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             fit-view-on-init
             @move="drawOutputs"
             @move-end="drawOutputs"
-            @nodes-initialized="fitView({ padding: 0.22, maxZoom: 1, duration: 150 })"
+            @nodes-initialized="frameInitializedNodes"
             @node-drag="drawOutputs"
           >
             <Background :gap="18" :size="0.6" pattern-color="#cbd7c0" />

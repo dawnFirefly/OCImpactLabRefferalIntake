@@ -19,7 +19,9 @@
     "NUXT_WORKSPACE_ORIGIN": "https://ocimpactlabrefferalintake.notnaren.workers.dev",
     "NUXT_CLOUDFLARE_ACCESS_TEAM_DOMAIN": "dawnff.cloudflareaccess.com",
     "NUXT_CLOUDFLARE_ACCESS_AUDIENCE": "c2041466dfcf1809cc651d534837dc5eeeacafe8d15d8abf1b7801e1e855aeb9",
-    "NUXT_WORKSPACE_ALLOWED_EMAILS": "vivianchih19@gmail.com"
+    "NUXT_WORKSPACE_ALLOWED_EMAILS": "vivianchih19@gmail.com,chihsamuel@gmail.com",
+    // TEMPORARY (user decision): no sign-in required for uploads/analysis. Remove to re-require Cloudflare Access.
+    "NUXT_WORKSPACE_PUBLIC_ACCESS": "true"
   },
   // Remote API requests also require a valid Cloudflare Access assertion.
   "workers_dev": true,
