@@ -218,3 +218,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Nuxt frontend
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/.data/
+
+# Local referral files and secrets
+*.pdf
+*.png
+*.jpg
+*.jpeg
+.local/
+.env
+.env.*
+!.env.example
+.DS_Store
