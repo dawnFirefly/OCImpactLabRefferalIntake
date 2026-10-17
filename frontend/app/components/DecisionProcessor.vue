@@ -22,6 +22,7 @@ import {
   ZoomOut,
   AlertCircle,
   ArrowRight,
+  X,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { Fact, Rule, PacketDocument } from "../types";
@@ -58,6 +59,69 @@ const dragging = ref(false),
 const review = ref<ReviewTarget | null>(null);
 const { fitView, zoomIn, zoomOut, getViewport, setViewport } = useVueFlow();
 const followingNodes = ref(true);
+type PanelId = "documents" | "processor" | "checklist";
+const panelLabels: Record<PanelId, string> = {
+  documents: "Applicant PDF", processor: "Processor", checklist: "Application review",
+};
+const closedPanels = ref<PanelId[]>([]);
+const visiblePanels = computed(() => (["documents", "processor", "checklist"] as PanelId[]).filter(id =>
+  !closedPanels.value.includes(id) && (id !== "documents" || !review.value)));
+type WindowId = PanelId | "source-review";
+const defaultWidths = { documents: 0.7, processor: 1.8, checklist: 1, "source-review": 1.5 };
+const panelWidths = ref({ ...defaultWidths });
+const windows = computed<WindowId[]>(() => [...visiblePanels.value, ...(review.value ? ["source-review" as const] : [])]);
+const panelColumns = computed(() => windows.value.map(id => `minmax(0, ${panelWidths.value[id]}fr)`).join(" 18px ") || "1fr");
+function windowStyle(id: WindowId) {
+  return { gridColumn: windows.value.indexOf(id) * 2 + 1, gridRow: 1 };
+}
+function closePanel(id: PanelId) {
+  closedPanels.value = [...closedPanels.value, id];
+  nextTick(drawOutputs);
+}
+function reopenPanel(id: PanelId) {
+  closedPanels.value = closedPanels.value.filter(panel => panel !== id);
+  nextTick(() => { frameInitializedNodes(); drawOutputs(); });
+}
+let panelResize: { left: WindowId; right: WindowId; startX: number; leftWidth: number; rightWidth: number; weight: number } | null = null;
+function resizePair(index: number) {
+  const left = windows.value[index], right = windows.value[index + 1];
+  if (!left || !right) return null;
+  const leftEl = workspaceElement.value?.querySelector<HTMLElement>(`[data-panel="${left}"]`);
+  const rightEl = workspaceElement.value?.querySelector<HTMLElement>(`[data-panel="${right}"]`);
+  if (!leftEl || !rightEl) return null;
+  return { left, right, startX: 0, leftWidth: leftEl.getBoundingClientRect().width,
+    rightWidth: rightEl.getBoundingClientRect().width, weight: panelWidths.value[left] + panelWidths.value[right] };
+}
+function applyPanelResize(pair: NonNullable<typeof panelResize>, delta: number) {
+  const total = pair.leftWidth + pair.rightWidth;
+  if (!total) return;
+  const minimum = Math.min(180, total / 2);
+  const leftWidth = Math.max(minimum, Math.min(total - minimum, pair.leftWidth + delta));
+  const leftWeight = pair.weight * leftWidth / total;
+  panelWidths.value = { ...panelWidths.value, [pair.left]: leftWeight, [pair.right]: pair.weight - leftWeight };
+  nextTick(drawOutputs);
+}
+function startPanelResize(event: PointerEvent, index: number) {
+  if (event.button !== 0) return;
+  panelResize = resizePair(index);
+  if (!panelResize) return;
+  panelResize.startX = event.clientX;
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  pauseFollowing();
+}
+function resizePanel(event: PointerEvent) {
+  if (panelResize) applyPanelResize(panelResize, event.clientX - panelResize.startX);
+}
+function resizePanelByKey(event: KeyboardEvent, index: number) {
+  if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+  event.preventDefault();
+  pauseFollowing();
+  if (event.key === "Home") panelWidths.value = { ...defaultWidths };
+  else {
+    const pair = resizePair(index);
+    if (pair) applyPanelResize(pair, event.key === "ArrowLeft" ? -24 : 24);
+  }
+}
 const displayedDocuments = computed(() => referral.value.documents);
 function switchApplicant(event: Event) {
   const id = (event.target as HTMLSelectElement).value;
@@ -231,6 +295,7 @@ const flashedRules = ref(new Set<string>()), linkNotice = ref("");
 let flashTimer: ReturnType<typeof setTimeout> | undefined;
 /** Scroll Application review to the first of these requirements (expanding its group) and flash them. */
 function revealRules(ids: string[]) {
+  if (closedPanels.value.includes("checklist")) reopenPanel("checklist");
   const wanted = new Set(ids);
   clearTimeout(flashTimer);
   if (!wanted.size) {
@@ -291,6 +356,10 @@ function drawOutputs() {
     outputWires.value = [];
     return;
   }
+  if (!graph.width || !graph.height || !panel.width || !panel.height) {
+    outputWires.value = [];
+    return;
+  }
   const ids =
     referral.value.facts.find((f) => f.id === selectedFact.value)?.rule_ids ||
     [];
@@ -343,9 +412,9 @@ function frameInitializedNodes() {
   if (pendingFocusNode) {
     const id = pendingFocusNode;
     pendingFocusNode = undefined;
-    fitView({ nodes: [id], padding: 0.35, maxZoom: 1, duration: 650 });
+    fitView({ nodes: [id], padding: 0.35, maxZoom: 1, duration: 1500 });
   } else {
-    fitView({ padding: 0.22, maxZoom: 1, duration: 650 });
+    fitView({ padding: 0.22, maxZoom: 1, duration: 1500 });
   }
 }
 watch(
@@ -368,12 +437,31 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
 </script>
 
 <template>
-  <main ref="workspaceElement" class="workspace" :class="{ reviewing: review }">
+  <div v-if="closedPanels.length" class="panel-restore" aria-label="Reopen panels">
+    <span>Reopen:</span>
+    <Button v-for="id in closedPanels" :key="id" variant="outline" size="sm" @click="reopenPanel(id)">{{ panelLabels[id] }}</Button>
+  </div>
+  <main ref="workspaceElement" class="workspace resizable-workspace" :class="{ reviewing: review }" :style="{ gridTemplateColumns: panelColumns }" @transitionend="drawOutputs">
+    <p v-if="!visiblePanels.length && !review" class="closed-workspace">All panels are closed. Reopen a panel above to continue.</p>
+    <div v-for="(id, index) in windows.slice(0, -1)" :key="id"
+      class="panel-resizer" role="separator" tabindex="0" aria-orientation="vertical"
+      :aria-label="`Resize ${panelLabels[id as PanelId] || 'Source review'} and ${panelLabels[windows[index + 1] as PanelId] || 'Source review'}`"
+      :aria-valuenow="Math.round(100 * panelWidths[id] / (panelWidths[id] + panelWidths[windows[index + 1]!]))"
+      :aria-valuemin="0" :aria-valuemax="100"
+      :style="{ gridColumn: index * 2 + 2, gridRow: 1 }"
+      @pointerdown.prevent="startPanelResize($event, index)" @pointermove="resizePanel"
+      @pointerup="panelResize = null" @pointercancel="panelResize = null" @lostpointercapture="panelResize = null"
+      @keydown="resizePanelByKey($event, index)" @dblclick="panelWidths = { ...defaultWidths }"
+    ><span /></div>
     <svg v-if="outputWires.length" class="output-wires" aria-hidden="true">
       <path v-for="wire in outputWires" :key="wire.id" :d="wire.d" :style="wire.style" />
     </svg>
-    <section v-show="!review" class="panel documents" aria-labelledby="documents-title">
-      <header class="panel-head">
+    <section v-show="!review && !closedPanels.includes('documents')" class="panel documents" aria-labelledby="documents-title"
+      :style="windowStyle('documents')" data-panel="documents">
+      <header class="panel-head resizable-panel-head">
+        <div class="panel-window-actions">
+          <Button variant="ghost" size="icon" class="size-5" aria-label="Close Applicant PDF panel" @click="closePanel('documents')"><X :size="13" /></Button>
+        </div>
         <div class="eyebrow"><span class="step">01</span> Sources</div>
         <div class="head-row">
           <h1 id="documents-title">Applicant PDF</h1>
@@ -466,8 +554,12 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
         <button v-else @click="demo">Reset demo</button>
       </footer>
     </section>
-    <section class="panel processor" aria-labelledby="processor-title">
-      <header class="panel-head">
+    <section v-show="!closedPanels.includes('processor')" class="panel processor" aria-labelledby="processor-title"
+      :style="windowStyle('processor')" data-panel="processor">
+      <header class="panel-head resizable-panel-head">
+        <div class="panel-window-actions">
+          <Button variant="ghost" size="icon" class="size-5" aria-label="Close Processor panel" @click="closePanel('processor')"><X :size="13" /></Button>
+        </div>
         <div class="eyebrow">
           <span class="step">02</span> Extract & connect
         </div>
@@ -637,8 +729,12 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
         </div>
       </footer>
     </section>
-    <section class="panel checklist" aria-labelledby="checklist-title">
-      <header class="panel-head">
+    <section v-show="!closedPanels.includes('checklist')" class="panel checklist" aria-labelledby="checklist-title"
+      :style="windowStyle('checklist')" data-panel="checklist">
+      <header class="panel-head resizable-panel-head">
+        <div class="panel-window-actions">
+          <Button variant="ghost" size="icon" class="size-5" aria-label="Close Application review panel" @click="closePanel('checklist')"><X :size="13" /></Button>
+        </div>
         <div class="eyebrow"><span class="step">03</span> Result</div>
         <div class="head-row">
           <h2 id="checklist-title">Application review</h2>
@@ -736,7 +832,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
         <span>{{ treeView ? "IHH decision tree · 6 stages" : "Linked to sources" }}</span><span>{{ referral.status === "analyzed" ? "Coordinator review" : treeView ? `${referral.checklist.rules.length} criteria` : "Example checklist" }}</span>
       </footer>
     </section>
-    <SourceReviewPanel v-if="review" :target="review" @close="closeReview" @select="openReview" />
+    <SourceReviewPanel :style="windowStyle('source-review')" data-panel="source-review" v-if="review" :target="review" @close="closeReview" @select="openReview" />
   </main>
 </template>
 <style scoped>

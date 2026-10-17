@@ -47,7 +47,7 @@ const currentEvidence = computed(() => evidence.value.find((e) => e.id === focus
 const pdfDocument = computed(() =>
   referral.value.documents.find((d) => d.id === (currentEvidence.value?.document_id || section.value?.document_id || props.target.id)) || referral.value.documents[0]);
 const citedPages = computed(() => [...new Set(section.value ? section.value.pages : evidence.value.map((e) => e.page))]);
-const focusPage = ref(1);
+const focusPage = ref<number | null>(null);
 function focus(e: Evidence) {
   focusedEvidence.value = e.id;
   focusPage.value = e.page;
@@ -60,13 +60,14 @@ function focusPageNumber(page: number) {
 
 const editValue = ref(""), editNote = ref(""), reviewStatus = ref("unknown"), reviewError = ref(""), saved = ref("");
 const adjusting = ref(false);
-watch(() => [props.target.kind, props.target.id, props.target.kind === "rule" ? props.target.factId : ""], () => {
+watch(() => [props.target.kind, props.target.id, props.target.kind === "rule" ? props.target.factId : "",
+  preferredEvidence.value?.id, preferredEvidence.value?.page, section.value?.pages.join(",")], () => {
   editValue.value = fact.value?.value || "";
   editNote.value = fact.value?.review_note || rule.value?.note || "";
   reviewStatus.value = rule.value?.status || "unknown";
   reviewError.value = saved.value = "";
   focusedEvidence.value = preferredEvidence.value?.id || null;
-  focusPage.value = currentEvidence.value?.page || citedPages.value[0] || 1;
+  focusPage.value = currentEvidence.value?.page ?? citedPages.value[0] ?? null;
   focusTick.value++;
 }, { immediate: true });
 

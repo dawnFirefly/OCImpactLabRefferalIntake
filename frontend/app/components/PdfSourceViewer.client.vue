@@ -13,7 +13,7 @@ const props = withDefaults(
     url: string;
     title: string;
     /** Page to bring into view; changes (or `focusKey` changes) scroll to it. */
-    page?: number;
+    page?: number | null;
     bbox?: [number, number, number, number] | null;
     /** Pages cited by the current selection, outlined in the scroll. */
     citedPages?: number[];
@@ -39,7 +39,12 @@ const validBox = computed(() => {
   const b = props.bbox;
   return b && b.every(Number.isFinite) && b[0] >= 0 && b[1] >= 0 && b[2] <= 1 && b[3] <= 1 && b[2] > b[0] && b[3] > b[1] ? b : null;
 });
-const target = computed(() => Math.max(1, Math.min(props.page, pageCount.value || props.page)));
+// Never turn an absent or invalid citation into a different page.
+const target = computed(() => Number.isInteger(props.page) && props.page! >= 1
+  && props.page! <= pageCount.value ? props.page! : null);
+function pageTop(pageEl: HTMLElement, el: HTMLElement) {
+  return pageEl.getBoundingClientRect().top - el.getBoundingClientRect().top - el.clientTop + el.scrollTop;
+}
 function cssSize(n: number) {
   const size = sizes.value[n - 1];
   if (!size || !width.value) return { width: "100%", height: "0px" };
@@ -91,15 +96,16 @@ function updateCurrentPage() {
   if (!el || !pageCount.value) return;
   const probe = el.scrollTop + el.clientHeight * 0.35;
   let page = 1;
-  for (const [n, pageEl] of pageElements) if (pageEl.offsetTop <= probe && n > page) page = n;
+  for (const [n, pageEl] of pageElements) if (pageTop(pageEl, el) <= probe && n > page) page = n;
   currentPage.value = page;
 }
-function scrollToPage(n: number, smooth = true) {
+function scrollToPage(n: number | null, smooth = true) {
+  if (n === null) return;
   const el = container.value, pageEl = pageElements.get(n);
   if (!el || !pageEl) return;
   const box = n === target.value ? validBox.value : null;
   const offset = box ? box[1] * pageEl.offsetHeight - el.clientHeight * 0.3 : -GAP / 2;
-  el.scrollTo({ top: Math.max(0, pageEl.offsetTop + offset), behavior: smooth ? "smooth" : "auto" });
+  el.scrollTo({ top: Math.max(0, pageTop(pageEl, el) + offset), behavior: smooth ? "smooth" : "auto" });
 }
 async function load() {
   const version = ++generation;
@@ -147,8 +153,16 @@ onMounted(() => {
       const before = width.value;
       measure();
       if (before === width.value) return;
+      // Preserve the reader's position during layout changes, rather than
+      // snapping back to a citation (or the top of an unrelated page).
+      const el = container.value;
       const keep = currentPage.value;
-      nextTick(() => { scrollToPage(keep, false); nearby.forEach(renderPage); });
+      const pageEl = pageElements.get(keep);
+      const fraction = el && pageEl ? (el.scrollTop - pageTop(pageEl, el)) / pageEl.offsetHeight : 0;
+      nextTick(() => {
+        if (el && pageEl) el.scrollTo({ top: Math.max(0, pageTop(pageEl, el) + fraction * pageEl.offsetHeight), behavior: "auto" });
+        nearby.forEach(renderPage);
+      });
     }, 120);
   });
   if (container.value) resize.observe(container.value);
@@ -172,7 +186,7 @@ onBeforeUnmount(() => {
       <div class="pdf-actions">
         <Button variant="ghost" size="icon" class="size-7" aria-label="Previous PDF page" :disabled="loading || currentPage <= 1" @click="scrollToPage(currentPage - 1)"><ChevronUp :size="14" /></Button>
         <Button variant="ghost" size="icon" class="size-7" aria-label="Next PDF page" :disabled="loading || currentPage >= pageCount" @click="scrollToPage(currentPage + 1)"><ChevronDown :size="14" /></Button>
-        <Button variant="ghost" size="icon" class="size-7" :aria-label="`Return to page ${target}`" :disabled="loading" @click="scrollToPage(target)"><Crosshair :size="14" /></Button>
+        <Button variant="ghost" size="icon" class="size-7" :aria-label="target ? `Return to page ${target}` : 'No cited page'" :disabled="loading || target === null" @click="scrollToPage(target)"><Crosshair :size="14" /></Button>
         <Button variant="ghost" size="icon" class="size-7" as-child><a :href="`${url}#page=${currentPage}`" target="_blank" rel="noopener" aria-label="Open original PDF"><ExternalLink :size="14" /></a></Button>
       </div>
     </div>
@@ -198,7 +212,7 @@ onBeforeUnmount(() => {
         />
       </div>
     </div>
-    <div v-if="!validBox" class="pdf-anchor-note">Cited pages are outlined · no passage highlight for this citation.</div>
+    <div v-if="!validBox" class="pdf-anchor-note">{{ target === null ? 'No source location is linked to this item.' : 'Cited pages are outlined · no passage highlight for this citation.' }}</div>
     <div v-else-if="boxNote" class="pdf-anchor-note">{{ boxNote }}</div>
   </div>
 </template>

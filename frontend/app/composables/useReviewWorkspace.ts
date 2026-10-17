@@ -203,6 +203,18 @@ export function useReviewWorkspace() {
     rememberApplicant();
     return referral.value.id;
   }
+  /** Start a browser-session applicant directly from the selected file, without packet storage. */
+  function createApplicantForAnalysis(fields: IntakeInput, file: File) {
+    const id = addApplicant(fields.name || file.name);
+    const now = new Date().toISOString();
+    referral.value.intake = {
+      receivedAt: fields.receivedAt || now, uploadedAt: now, size: file.size,
+      source: fields.source || "", contact: fields.contact || "", priority: fields.priority || "routine",
+      reviewer: fields.reviewer || "", notes: fields.notes || "", reviewStatus: "in_review",
+    };
+    attach([file]); // Retains the original File locally and starts the foreground stream immediately.
+    return id;
+  }
   // ── Stored applicants: background analysis and saved results ───────────────
   const isStored = (r: Referral) => r.id.startsWith("stored-");
   const packetId = (id: string) => id.replace(/^stored-/, "");
@@ -302,6 +314,13 @@ export function useReviewWorkspace() {
   }
   /** Saves intake/status edits, keeping the in-session review (facts, checklist, audit) intact. */
   async function updateStoredApplicant(id: string, fields: IntakeInput) {
+    const local = applicants.value.find(a => a.id === id);
+    if (local && !isStored(local)) {
+      const { name, ...intake } = fields;
+      if (name !== undefined) local.title = name;
+      if (local.intake) Object.assign(local.intake, intake);
+      return local;
+    }
     const packet = await $fetch<StoredPacket>(`/api/applicants/${encodeURIComponent(id.replace(/^stored-/, ""))}`, {
       method: "PATCH", body: fields,
     });
@@ -314,7 +333,9 @@ export function useReviewWorkspace() {
     return record;
   }
   async function deleteStoredApplicant(id: string) {
-    await $fetch(`/api/applicants/${encodeURIComponent(id.replace(/^stored-/, ""))}`, { method: "DELETE" });
+    if (id.startsWith("stored-")) await $fetch(`/api/applicants/${encodeURIComponent(id.replace(/^stored-/, ""))}`, { method: "DELETE" });
+    filesByApplicant.delete(id);
+    namesByApplicant.delete(id);
     applicants.value = applicants.value.filter((a) => a.id !== id);
     if (referral.value.id === id) selectApplicant("synthetic-demo");
   }
@@ -405,6 +426,7 @@ export function useReviewWorkspace() {
     referral.value = {
       id: referral.value.status === "awaiting_pdf" ? referral.value.id : crypto.randomUUID(),
       title: referral.value.status === "awaiting_pdf" ? referral.value.title : list[0]!.name,
+      intake: referral.value.status === "awaiting_pdf" ? referral.value.intake : undefined,
       status: "awaiting_claude",
       revision: 0,
       documents: list.map((f) => {
@@ -488,6 +510,7 @@ export function useReviewWorkspace() {
     addApplicant,
     loadStoredApplicants,
     createStoredApplicant,
+    createApplicantForAnalysis,
     analyzeInBackground,
     backgroundIds,
     backgroundErrors,

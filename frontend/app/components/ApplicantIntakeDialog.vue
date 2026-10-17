@@ -9,10 +9,10 @@ import { Textarea } from "@/components/ui/textarea";
 import type { Referral } from "~/types";
 import { REVIEW_WINDOW_MS, type IntakeInput } from "~/composables/useReviewWorkspace";
 
-/** Add (with PDF upload) or edit (details only) a stored applicant. */
+/** Add a session applicant for immediate analysis, or edit existing intake details. */
 const props = defineProps<{ applicant?: Referral | null }>();
 const open = defineModel<boolean>("open", { required: true });
-const { createStoredApplicant, updateStoredApplicant, selectApplicant, analyze, referral } = inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
+const { createApplicantForAnalysis, updateStoredApplicant } = inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
 
 const editing = computed(() => !!props.applicant?.intake);
 const file = shallowRef<File | null>(null);
@@ -85,12 +85,9 @@ async function save() {
       await updateStoredApplicant(props.applicant!.id, fields);
       open.value = false;
     } else {
-      const applicant = await createStoredApplicant(fields, file.value!);
-      selectApplicant(applicant.id);
+      createApplicantForAnalysis(fields, file.value!);
       open.value = false;
       await navigateTo("/processor");
-      // Start only after navigation, and never analyze a different selection.
-      if (referral.value.id === applicant.id) void analyze();
     }
   } catch (e: any) {
     error.value = e?.data?.statusMessage || e?.statusMessage || "Could not save. Try again.";
@@ -106,7 +103,7 @@ async function save() {
       <DialogHeader>
         <DialogTitle>{{ editing ? "Edit applicant details" : "Add applicant" }}</DialogTitle>
         <DialogDescription>
-          {{ editing ? "Update intake details. The stored referral PDF is not changed." : "Upload the combined referral packet. Adding the applicant opens the processor and starts Claude analysis. Review is due 2 hours after receipt." }}
+          {{ editing ? "Update intake details. The referral PDF is not changed." : "Upload the combined referral packet. Adding the applicant opens the processor and starts Claude analysis. Review is due 2 hours after receipt." }}
         </DialogDescription>
       </DialogHeader>
 
@@ -182,7 +179,7 @@ async function save() {
       <DialogFooter>
         <Button type="button" variant="outline" :disabled="saving" @click="open = false">Cancel</Button>
         <Button type="submit" form="intake-form" :disabled="!canSave">
-          {{ saving ? (editing ? "Saving…" : "Uploading…") : editing ? "Save changes" : "Add applicant" }}
+          {{ saving ? (editing ? "Saving…" : "Starting analysis…") : editing ? "Save changes" : "Add applicant" }}
         </Button>
       </DialogFooter>
     </DialogContent>

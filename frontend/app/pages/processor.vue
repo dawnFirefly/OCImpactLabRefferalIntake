@@ -3,7 +3,7 @@ useHead({ title: "Decision processor · ReferralReady" });
 </script>
 
 <template>
-  <div>
+  <div class="processor-page">
     <DecisionProcessor />
   </div>
 </template>

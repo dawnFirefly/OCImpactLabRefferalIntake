@@ -693,8 +693,10 @@ h2 {
 .app-nav nav { display: flex; gap: 22px; }
 .app-nav nav a { text-decoration: none; color: #788574; padding: 8px 0; }
 .app-nav nav a.current { color: var(--foreground); border-bottom: 2px solid var(--primary); }
-.active-applicant { margin-left: auto; color: #788574; font-size: 12px; }
-.app-shell .workspace { height: calc(100dvh - 130px); min-height: 620px; }
+.processor-shell { height: 100dvh; display: flex; flex-direction: column; }
+.processor-shell .app-nav { flex-shrink: 0; }
+.processor-page { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.app-shell .workspace { flex: 1; align-self: stretch; width: 100%; height: auto; min-height: 0; margin: 0 auto; grid-template-rows: minmax(0, 1fr); }
 .skeleton-page { max-width: 1080px; margin: 0 auto; padding: 48px 24px; }
 .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 32px; }
 .skeleton-page h1 { font-size: 28px; font-weight: 600; margin: 10px 0; }
@@ -712,8 +714,8 @@ h2 {
 .summary-ready { margin-left: auto; display: flex; align-items: center; gap: 12px; color: #788574; font-size: 12px; }
 @media (max-width: 850px) {
   .app-nav { flex-wrap: wrap; gap: 12px 24px; }
-  .active-applicant { display: none; }
-  .app-shell .workspace { height: auto; min-height: 0; }
+  .processor-shell { height: auto; min-height: 100dvh; }
+  .app-shell .workspace { height: auto; min-height: 0; grid-template-rows: none; }
   .applicant-card, .page-heading { align-items: flex-start; flex-wrap: wrap; }
   .summary-ready { flex-wrap: wrap; justify-content: flex-end; }
 }
@@ -800,3 +802,18 @@ h2 {
 .source-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px; }
 .stop-link { justify-self: start; color: #a26144; text-decoration: underline; }
 .analysis-controls .analysis-progress { margin: 0; }
+
+/* Panel dividers resize adjacent windows without changing their positions. */
+.resizable-panel-head { position: relative; }
+.resizable-panel-head > .eyebrow { padding-right: 22px; }
+.panel-window-actions { position: absolute; right: 8px; top: 3px; display: flex; }
+.panel-restore { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 8px 24px 0; color: #788574; font-size: 12px; }
+.closed-workspace { align-self: center; justify-self: center; color: #788574; }
+.workspace.resizable-workspace { column-gap: 0; transition: none; }
+.panel-resizer { display: flex; align-items: center; justify-content: center; cursor: col-resize; touch-action: none; user-select: none; border-radius: 6px; }
+.panel-resizer span { width: 3px; height: 40px; border-radius: 3px; background: #cbd7c0; transition: background 0.15s; }
+.panel-resizer:hover span, .panel-resizer:focus-visible span { background: var(--primary); }
+@media (max-width: 850px) {
+  .panel-resizer { display: none; }
+  .resizable-workspace > .panel { resize: vertical; }
+}

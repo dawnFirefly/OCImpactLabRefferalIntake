@@ -81,15 +81,15 @@ Original referral packets, their contents, generated patient screenshots, creden
 
 ## Three-page scaffold
 
-- `/`: referral intake dashboard: summary counts, search, status/priority filters, sorting, inline review status (Open, In review, Needs info, Approved, Denied — set manually by the coordinator), and a 2-hour review countdown from the received time. **Add applicant** uploads one combined referral PDF, which the server stores (see below), then opens the processor and automatically starts Claude analysis. Analysis failures appear in the processor with a retry action; the saved applicant remains available. Opening an *Open* referral marks it *In review*.
+- `/`: referral intake dashboard: summary counts, search, status/priority filters, sorting, inline review status (Open, In review, Needs info, Approved, Denied — set manually by the coordinator), and a 2-hour review countdown from the received time. **Add applicant** keeps one combined PDF in browser memory, starts Claude analysis immediately, and opens the processor. It does not upload to packet storage. Analysis failures appear in the processor with a retry action; the session applicant remains available until reload. Opening an *Open* referral marks it *In review*.
 - `/processor`: the existing PDF → information nodes → checklist workspace.
 - `/summary`: the active applicant's recommendation (from the decision model, else the staged decision tree over the checklist), discrepancies and gaps, required documents DOC-1–DOC-10, and criteria by decision-tree stage. Clicking any item opens its cited page in the PDF beside it, with the located passage highlighted. Read-only: the coordinator decides.
 
-Use **Continue to summary** to demonstrate the flow. Uploading a PDF in the processor starts Claude analysis. **Add applicant** on the dashboard starts it automatically in the background (one at a time, while the tab stays open); the result is saved with the applicant, so reopening it never re-runs Claude. **Analyze again** in the processor overwrites the saved result. Results are not cached when Google Drive storage is used. Uploaded applicants and their PDFs persist on the server. Review edits remain in memory across route navigation and reset on reload. Page ownership and shared contracts are documented in [the page handoff](docs/page-handoff.md).
+Use **Continue to summary** after analysis completes. Dashboard **Add applicant** and processor PDF uploads start foreground Claude analysis immediately. New dashboard applicants, their original PDFs, results, and review edits stay in browser memory across route navigation and reset on reload. Explicit **Save PDF to private storage** remains separate. Previously stored applicants still load from the server and can reuse their saved analyses. Page ownership and shared contracts are documented in [the page handoff](docs/page-handoff.md).
 
 ## Packet storage
 
-**Add applicant** opens a dialog that posts a name, optional intake details (received time, priority, referring facility, referrer contact, assigned reviewer, notes), and one PDF (max 50 MB, checked for a `%PDF-` header) to Nuxt server routes in `frontend/server/`:
+**Add applicant** now starts a session-only analysis without calling these storage routes. The existing packet storage API remains available for previously stored applicants in `frontend/server/`:
 
 | Route | Purpose |
 | --- | --- |

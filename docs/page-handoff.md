@@ -30,3 +30,5 @@ The summary shows only what the analysis returned (recommendation, rule statuses
 ## Verification
 
 Run tests, typecheck and build. Exercise dashboard → create/select applicant → processor → summary → back. Check edits remain on the same applicant and R01–R11 stay separate. Never distribute `public/local-demo` packets in a build.
+
+Dashboard **Add applicant** uses `createApplicantForAnalysis(fields, file)`: creates a session record with intake details, keeps the original File and a blob preview in memory, starts foreground Claude analysis immediately, and navigates to `/processor`. It does not call `/api/applicants` or queue background analysis. Editing/status/deletion of session applicants stays local. New applicants and their results reset on reload; legacy stored applicants retain the storage workflow.

@@ -8,7 +8,7 @@ const summaryReady = computed(() => route.path === "/processor" &&
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'processor-shell': route.path === '/processor' }">
     <header class="app-nav">
       <NuxtLink to="/" class="brand">ReferralReady</NuxtLink>
       <nav aria-label="Main navigation">
@@ -20,7 +20,6 @@ const summaryReady = computed(() => route.path === "/processor" &&
         <span>Analysis is ready for summary.</span>
         <Button as-child><NuxtLink to="/summary">Continue to summary →</NuxtLink></Button>
       </div>
-      <span v-else class="active-applicant">{{ referral.title }}</span>
     </header>
     <slot />
   </div>

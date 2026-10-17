@@ -150,13 +150,13 @@ const selection = ref<{ key: string; label: string; evidence: Evidence[] } | nul
 const evidenceIndex = ref(0);
 const focusTick = ref(0);
 const currentEvidence = computed(() => selection.value?.evidence[evidenceIndex.value]);
-const viewerPage = ref(1);
+const viewerPage = ref<number | null>(null);
 function select(key: string, label: string, ruleIds: string[], factId?: string) {
   const fact = factId ? factById.value.get(factId) : undefined;
   const evidence = fact ? fact.evidence_ids.map((id) => evidenceById.value.get(id)).filter((e): e is Evidence => !!e) : evidenceFor(ruleIds);
   selection.value = { key, label, evidence };
   evidenceIndex.value = 0;
-  if (evidence[0]) viewerPage.value = evidence[0].page;
+  viewerPage.value = evidence[0]?.page ?? null;
   focusTick.value++;
 }
 function step(delta: number) {
@@ -310,7 +310,7 @@ const toneClass = (tone: Tone) => `tone-${tone}`;
         <template v-if="selection">
           <span class="min-w-0 flex-1 truncate text-sm">
             <b>Source for:</b> {{ selection.label }}
-            <span class="text-muted-foreground"> · {{ currentEvidence ? `page ${currentEvidence.page}` : selection.evidence.length ? "" : `page ${viewerPage}` }}</span>
+            <span class="text-muted-foreground"> · {{ currentEvidence ? `page ${currentEvidence.page}` : selection.evidence.length ? "" : viewerPage ? `page ${viewerPage}` : 'no linked source' }}</span>
           </span>
           <template v-if="selection.evidence.length > 1">
             <Button variant="ghost" size="icon-sm" aria-label="Previous citation" @click="step(-1)"><ChevronLeft class="size-4" /></Button>
