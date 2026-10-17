@@ -4,8 +4,7 @@
 
 ## Team
 
-- Team: Dawn Firefly (OC Impact Lab, Illumination Health + Home challenge)
-- Members: _add names here_
+- Team: Team Eureka (OC Impact Lab, Illumination Health + Home challenge)
 
 ## The problem
 
