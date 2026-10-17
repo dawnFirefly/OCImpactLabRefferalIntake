@@ -56,8 +56,31 @@ Original referral packets, their contents, generated patient screenshots, creden
 
 ## Three-page scaffold
 
-- `/`: applicant dashboard with local applicant creation and selection.
+- `/`: referral intake dashboard: summary counts, search, status/priority filters, sorting, inline review status (New, In review, Needs info, Approved, Denied, Completed — set manually by the coordinator), and a 2-hour review countdown from the received time. **Add applicant** uploads one combined referral PDF, which the server stores (see below). Opening a *New* referral marks it *In review*.
 - `/processor`: the existing PDF → information nodes → checklist workspace.
 - `/summary`: placeholder summary, items needing attention, and recommended changes.
 
-Use **Continue to summary** to demonstrate the flow. There is no automatic analysis completion or summary generation yet. Applicant records, PDF object URLs, and review edits remain in memory across route navigation and reset on reload. Page ownership and shared contracts are documented in [the page handoff](docs/page-handoff.md).
+Use **Continue to summary** to demonstrate the flow. There is no automatic analysis completion or summary generation yet. Uploaded applicants and their PDFs persist on the server. Review edits remain in memory across route navigation and reset on reload. Page ownership and shared contracts are documented in [the page handoff](docs/page-handoff.md).
+
+## Packet storage
+
+**Add applicant** opens a dialog that posts a name, optional intake details (received time, priority, referring facility, referrer contact, assigned reviewer, notes), and one PDF (max 50 MB, checked for a `%PDF-` header) to Nuxt server routes in `frontend/server/`:
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/applicants` | List stored applicants |
+| `POST /api/applicants` | Multipart `name` + `file`; stores the PDF |
+| `GET /api/applicants/:id/pdf` | Stream the stored PDF to the processor preview |
+| `PATCH /api/applicants/:id` | Update intake details or review status (JSON) |
+| `DELETE /api/applicants/:id` | Delete (local) or move to Drive trash |
+
+**Default: local disk.** With no configuration, PDFs and an `index.json` go to `frontend/.data/referrals/` (Git-ignored). This needs no setup but only lives on the machine running the server.
+
+**Optional: Google Drive.** Copy `frontend/.env.example` to `frontend/.env` and fill in all four values; the server then stores and lists packets in one Drive folder (applicant metadata is kept in each file's `appProperties`), so everyone using that server sees the same list.
+
+1. In Google Cloud Console, enable the **Google Drive API**, then create an OAuth client ID (type *Web application*) with `https://developers.google.com/oauthplayground` as an authorized redirect URI.
+2. In the [OAuth Playground](https://developers.google.com/oauthplayground), open the settings gear, choose **Use your own OAuth credentials**, and enter the client ID and secret. Authorize the scope `https://www.googleapis.com/auth/drive`, then exchange the code for tokens and copy the **refresh token**. If the OAuth consent screen is in *Testing* mode, refresh tokens expire after 7 days; publish it, or regenerate the token when it expires.
+3. Create a Drive folder and copy its ID from the URL (`drive.google.com/drive/folders/<FOLDER_ID>`). Shared drives work too.
+4. Restart `npm run dev`. Upload responses show `"storage": "google_drive"`.
+
+Referral packets contain patient information. Use a Drive account and folder your organization has approved for that data, keep sharing restricted, and never commit `.env`. There is no authentication on these routes: run the server only on a trusted machine or network.

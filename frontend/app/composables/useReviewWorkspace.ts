@@ -1,9 +1,21 @@
 import { createR01Mock } from "../data/r01Mock";
 import { createDemo } from "../data/demo";
-import type { Referral, Fact, Rule, PacketDocument } from "../types";
+import type { Referral, Fact, Rule, PacketDocument, Intake } from "../types";
 import { createDemoPdf } from "../lib/demoPdf";
 
-/** Frontend-only session state. No extraction, model requests, or PDF text extraction. */
+/** Applicant packet persisted by the server (`server/api/applicants`). */
+export type StoredPacket = Intake & {
+  id: string;
+  name: string;
+  fileName: string;
+  storage: "local" | "google_drive";
+};
+/** Editable intake fields sent to the server on create/update. */
+export type IntakeInput = Partial<Pick<StoredPacket, "name" | "receivedAt" | "source" | "contact" | "priority" | "reviewer" | "notes" | "reviewStatus">>;
+/** Review deadline: two hours after the referral was received. */
+export const REVIEW_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+/** Session state. Stored packets are persisted by the server; no extraction, model requests, or PDF text extraction. */
 export function useReviewWorkspace() {
   const referral = ref<Referral>(createDemo());
   const applicants = ref<Referral[]>([]);
@@ -42,6 +54,54 @@ export function useReviewWorkspace() {
     mode.value = "attached";
     rememberApplicant();
     return referral.value.id;
+  }
+  function storedReferral(packet: StoredPacket): Referral {
+    const { id, name, fileName, storage, ...intake } = packet;
+    return {
+      id: `stored-${packet.id}`, title: packet.name, intake, status: "awaiting_claude", revision: 0,
+      documents: [{
+        id: `stored-doc-${packet.id}`, name: packet.fileName, page_count: null, status: "stored",
+        error: null, pages: [], local_url: `/api/applicants/${encodeURIComponent(packet.id)}/pdf`,
+      }],
+      facts: [], evidence: [], error: null, audit: [],
+      checklist: { precedence: "", source_url: "", rules: [], counts: {} },
+    };
+  }
+  /** Adds stored applicants without replacing session records (and their edits) already loaded. */
+  async function loadStoredApplicants() {
+    const packets = await $fetch<StoredPacket[]>("/api/applicants");
+    for (const packet of packets) {
+      if (!applicants.value.some((a) => a.id === `stored-${packet.id}`)) applicants.value.push(storedReferral(packet));
+    }
+    return packets;
+  }
+  /** Uploads one combined PDF with intake details, stores it on the server, and adds the applicant. */
+  async function createStoredApplicant(fields: IntakeInput, file: File) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) if (value !== undefined) form.append(key, value);
+    form.append("file", file);
+    const packet = await $fetch<StoredPacket>("/api/applicants", { method: "POST", body: form });
+    const record = storedReferral(packet);
+    applicants.value.push(record);
+    return record;
+  }
+  /** Saves intake/status edits, keeping the in-session review (facts, checklist, audit) intact. */
+  async function updateStoredApplicant(id: string, fields: IntakeInput) {
+    const packet = await $fetch<StoredPacket>(`/api/applicants/${encodeURIComponent(id.replace(/^stored-/, ""))}`, {
+      method: "PATCH", body: fields,
+    });
+    const record = applicants.value.find((a) => a.id === id);
+    if (record) {
+      const fresh = storedReferral(packet);
+      record.title = fresh.title;
+      record.intake = fresh.intake;
+    }
+    return record;
+  }
+  async function deleteStoredApplicant(id: string) {
+    await $fetch(`/api/applicants/${encodeURIComponent(id.replace(/^stored-/, ""))}`, { method: "DELETE" });
+    applicants.value = applicants.value.filter((a) => a.id !== id);
+    if (referral.value.id === id) selectApplicant("synthetic-demo");
   }
   function resetDemo() {
     attachedFiles.value = [];
@@ -182,6 +242,10 @@ export function useReviewWorkspace() {
     applicants,
     selectApplicant,
     addApplicant,
+    loadStoredApplicants,
+    createStoredApplicant,
+    updateStoredApplicant,
+    deleteStoredApplicant,
     error,
     attachedFiles,
     resetDemo,

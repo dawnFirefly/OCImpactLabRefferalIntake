@@ -365,7 +365,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
                   {{
                     doc.page_count
                       ? `${doc.page_count} pages · ${doc.status === "provided_demo" ? "provided example" : "example"}`
-                      : "Attached · awaiting Claude"
+                      : doc.status === "stored" ? "Stored · awaiting Claude" : "Attached · awaiting Claude"
                   }}
                 </div>
               </div>
@@ -394,7 +394,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
           Add this applicant’s combined referral PDF to begin.
         </div>
         <div v-else-if="awaitingClaude" class="local-label">
-          Files are attached in this browser session.<br />Claude analysis will
+          {{ referral.documents[0]?.status === "stored" ? "PDF is stored on the server." : "Files are attached in this browser session." }}<br />Claude analysis will
           be connected later.
         </div>
         <div v-if="error" class="error-box" role="alert">{{ error }}</div>

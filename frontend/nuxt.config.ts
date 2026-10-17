@@ -5,6 +5,11 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   modules: ["shadcn-nuxt"],
   css: ["~/assets/css/main.css"],
+  runtimeConfig: {
+    // Server-only. Set NUXT_GOOGLE_DRIVE_* to store packets in Google Drive;
+    // otherwise uploads are kept on local disk in .data/referrals.
+    googleDrive: { clientId: "", clientSecret: "", refreshToken: "", folderId: "" },
+  },
   vite: { plugins: [tailwindcss()] },
   shadcn: { prefix: "", componentDir: "./app/components/ui" },
   app: {
