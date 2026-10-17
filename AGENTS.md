@@ -2,11 +2,11 @@
 
 ## Current scope and user decisions
 
-This repository currently contains **a frontend scaffold only**. The user explicitly stopped backend/OCR implementation. Document understanding will use a Claude model in a later task.
+This repository contains a Nuxt frontend plus minimal Nuxt server routes (`frontend/server/`) that store uploaded applicant PDFs. The user explicitly stopped OCR implementation. Document understanding will use a Claude model in a later task.
 
 - Keep the minimal three-section workspace: one applicant PDF on the left, connected patient-information nodes in the middle, result checklist on the right.
 - Use Vue 3 / Nuxt 4 and actual shadcn-vue components. Vue Flow owns graph layout, pan, zoom, and source-to-fact edges.
-- The user authorized three routes only: applicant dashboard, existing decision processor, and placeholder summary. Keep the dashboard/summary skeletal; do not add authentication, admission automation, or a Python backend.
+- The user authorized three routes only: applicant dashboard, existing decision processor, and placeholder summary. Keep the summary skeletal; do not add authentication, admission automation, or a Python backend. The dashboard's **Add applicant** uploads one PDF for storage.
 - Do not implement or install local OCR, Tesseract, PDF text extraction, or image-based extraction. Do not extract the supplied packets as part of frontend work.
 - Do not mistake mock fixtures for analysis. Files attached in the current UI are browser-local and await a future Claude integration.
 
@@ -18,7 +18,7 @@ npm ci
 npm run dev
 ```
 
-Development URL: `http://127.0.0.1:3000`. No backend or API key is required.
+Development URL: `http://127.0.0.1:3000`. No API key is required; uploads default to local disk.
 
 Before delivery: `npm run typecheck` and `npm run build` from `frontend/`. For UI changes, render the actual screen and check the relevant interaction. Keep these commands and the README accurate.
 
@@ -26,7 +26,8 @@ Before delivery: `npm run typecheck` and `npm run build` from `frontend/`. For U
 
 - `frontend/app/app.vue`: root session provider and Nuxt router outlet.
 - `frontend/app/layouts/default.vue`: lightweight shared navigation.
-- `frontend/app/pages/index.vue`: applicant dashboard skeleton and session-local creation.
+- `frontend/app/pages/index.vue`: applicant dashboard; creates applicants by uploading one PDF to the server.
+- `frontend/server/`: `/api/applicants` routes and `utils/packetStore.ts` (local disk in `.data/referrals`, or Google Drive when `NUXT_GOOGLE_DRIVE_*` is set). See README "Packet storage".
 - `frontend/app/pages/processor.vue`: processor route and summary continuation.
 - `frontend/app/components/DecisionProcessor.vue`: existing three panels, graph, checklist, review dialog, browser PDF preview.
 - `frontend/app/pages/summary.vue`: placeholder sections only; no decision generation.

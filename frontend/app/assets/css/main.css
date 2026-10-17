@@ -23,6 +23,10 @@
   --radius-lg: 10px;
   --radius-xl: 14px;
 }
+/* shadcn default: borders use the theme colour (layered, so explicit styles below still win). */
+@layer base {
+  *, ::before, ::after { border-color: var(--color-border); }
+}
 :root {
   --background: #f4f5f2;
   --foreground: #2f3e32;
