@@ -432,8 +432,34 @@ watch(() => referral.value.id, () => { followingNodes.value = true; selectedFact
 // Reopening/closing the review resizes the graph column; refit once the grid transition settles.
 watch(() => review.value === null, () => setTimeout(() => { if (followingNodes.value) fitView({ padding: 0.22, maxZoom: 1, duration: 150 }); drawOutputs(); }, 220));
 watch(() => referral.value.checklist.rules.map(r => r.status).join(","), () => nextTick(drawOutputs));
-onMounted(() => window.addEventListener("resize", drawOutputs));
-onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
+// The graph may be framed before its column has a real size (e.g. a saved result loads while the
+// route is still laying out). Refit when the canvas is resized, unless the coordinator moved the camera.
+const graphWrap = ref<HTMLElement | null>(null);
+let graphResize: ResizeObserver | null = null;
+let graphResizeTimer: ReturnType<typeof setTimeout> | undefined;
+function refitIfFollowing(duration = 0) {
+  if (followingNodes.value && graphNodes.value.length) fitView({ padding: 0.22, maxZoom: 1, duration });
+}
+// A saved analysis replaces the empty stored record under the same applicant ID: show it framed.
+watch(() => referral.value, (now, before) => {
+  if (before && now !== before && now.id === before.id && now.status === "analyzed" && before.status !== "analyzing") {
+    followingNodes.value = true;
+    setTimeout(() => refitIfFollowing(), 250);
+  }
+});
+onMounted(() => {
+  window.addEventListener("resize", drawOutputs);
+  graphResize = new ResizeObserver(() => {
+    clearTimeout(graphResizeTimer);
+    graphResizeTimer = setTimeout(() => { refitIfFollowing(); drawOutputs(); }, 120);
+  });
+  if (graphWrap.value) graphResize.observe(graphWrap.value);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", drawOutputs);
+  graphResize?.disconnect();
+  clearTimeout(graphResizeTimer);
+});
 </script>
 
 <template>
@@ -613,7 +639,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
         >{{ followingNodes ? 'Following' : 'Follow' }}</Button>
       </div>
       <div class="graph-legend"><span>PDF → forms → facts → application</span><span v-if="live" class="live-key">● Live · provisional nodes</span><span class="missing-key">Red: missing</span><span class="uncertain-key">┄ Yellow: uncertain</span></div>
-      <div class="graph-wrap">
+      <div ref="graphWrap" class="graph-wrap">
         <ClientOnly
           ><VueFlow
             v-if="graphNodes.length"
