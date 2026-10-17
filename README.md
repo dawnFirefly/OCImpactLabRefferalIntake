@@ -44,7 +44,7 @@ _Add link here_
 | "Synthetic UI example" applicant | Mocked, fictional data |
 | Draft hospital response | Not built (draft-only by design if added) |
 | Connection to IHH systems, emails, faxes | None |
-| Login | Cloudflare Access on the deployed site; none locally |
+| Login | Cloudflare Access supported, but **temporarily off** on the deployed site (`NUXT_WORKSPACE_PUBLIC_ACCESS`); none locally |
 
 ## Where it gets things wrong
 
@@ -68,128 +68,115 @@ _Add link here_
 - Historical IHH outcome labels are never used to drive or explain decisions.
 - License: MIT (see `LICENSE`).
 
+
 ---
 
 ## Technical details
 
-A local referral-review workspace: **one combined scanned PDF + patient name → document forms → patient facts → application requirements**.
+Built with Nuxt 4, Vue 3, [shadcn-vue](https://www.shadcn-vue.com/) and Vue Flow, deployed as a Cloudflare Worker: <https://ocimpactlabrefferalintake.notnaren.workers.dev>. No local OCR or PDF text extraction: Claude reads the PDF itself.
 
-Built with Nuxt 4, Vue 3, shadcn-vue and Vue Flow. The Nuxt server sends the PDF to Claude for visual analysis; a second Claude pass reviews the extracted evidence against the organizer's IHH adult criteria. No local OCR or PDF text extraction is used.
+### Quick start
 
-### Run
-
-Use Node.js 26+ and npm.
+Node.js 26+ and npm.
 
 ```sh
 cd frontend
 npm ci
-npm run dev
-# Optional local Claude calls: create ignored .env.local from .env.example,
-# add a fresh key there, then use npm run dev
+cp .env.example .env.local   # add a fresh Anthropic key to .env.local (ignored by Git)
+npm run dev                  # http://127.0.0.1:3000
 ```
 
-Open [the processor](http://127.0.0.1:3000/processor). The synthetic flow works without credentials. Create an applicant or replace the sample PDF, enter the patient's name, and select **Analyze with Claude**. Analysis explicitly sends the name and original PDF to Anthropic. There is no automatic upload on attachment, preview, or applicant selection. The key is server-only and never requested by the browser. The tracked `.env` is an empty variable declaration only; never put a real key in that tracked file.
+The **Synthetic flow** (fictional "Jane Doe" packet) works without a key. With a key, upload any combined referral PDF and analysis starts immediately.
 
-`NUXT_CLAUDE_EXTRACTION_MODEL` (default `claude-haiku-5-5`) reads the PDF and streams forms, facts and approximate highlight positions; `NUXT_CLAUDE_REVIEW_MODEL` (default `claude-sonnet-5-5`) links facts to the admission criteria. Nodes and checklist results appear live while Claude writes and are provisional until the full result validates. Restart the server after changing environment settings. Do not reuse an API key exposed in chat.
+### Pages
 
-## Cloudflare Worker secrets and build
+| Route | What it does |
+| --- | --- |
+| `/` | Intake dashboard. **Add applicant** takes one PDF plus intake details, starts analysis and opens the processor. |
+| `/processor` | **Applicant PDF** (upload) · **Processor** graph (PDF → forms → facts) · **Application review** (IHH decision tree). |
+| `/summary` | Read-only recommendation, gaps, required documents and criteria by stage, each linked to its cited page. |
 
-The Worker target is `ocimpactlabrefferalintake`. Its secret is supplied at request time through `event.context.cloudflare.env.NUXT_ANTHROPIC_API_KEY`; local Nuxt development uses private runtime config. A missing Worker binding fails closed, without falling back to a local/build credential.
+### Analysis (two passes, streamed live)
+
+1. **Upload** a PDF (up to 50 MB). The patient name is optional: Claude reads it from the packet; a dashboard name is cross-checked.
+2. **Pass 1, Claude Haiku 5.5** (`NUXT_CLAUDE_EXTRACTION_MODEL`): forms/sections, facts, page citations, exact quotes and an approximate highlight box per quote.
+3. **Pass 2, Claude Sonnet 5.5** (`NUXT_CLAUDE_REVIEW_MODEL`): every one of the 155 pinned IHH criteria.
+4. Form and fact nodes pop into the graph and criteria fill in while Claude writes; all of it is labeled **provisional** until the complete result passes validation. On failure or **Stop analysis**, the previous workspace is restored.
+
+The browser sends the raw PDF bytes (`POST /api/analyze`, `content-type: application/pdf`); the server passes it to Claude through Anthropic's **Files API** and deletes it afterwards. Validation repairs only drop data or lower certainty, never raise it, and are listed under **Validation repairs applied**.
+
+### Navigation
+
+- **Click a fact or form node** → Application review scrolls to and highlights the linked criteria (the PDF does not open).
+- **Click a criterion** → the PDF opens on the right (PDF list hidden, graph narrowed), scrolled to the cited line and highlighted. The viewer scrolls continuously through all pages.
+- Edits keep the original value, add an audit note, and mark the recommendation and linked criteria for recheck.
+
+### Decision tree
+
+Application review always shows the full rubric, before analysis too, organized by [`frontend/decisionTree.md`](frontend/decisionTree.md) and implemented in [`frontend/shared/decision-tree.ts`](frontend/shared/decision-tree.ts): 1 General & payer eligibility · 2 Safety, behavioral & cognitive · 3 Mobility & ADLs · 4 Medical stability & exclusions · 5 Conditional services · 6 Required documentation. Each stage shows Pass / Denied / Human review / Hold / Conditional / RFI / Needs review. OTH-2 and NEU-X6 route to human review, never auto-denial; missing documents give an RFI; missing evidence is never a denial. Criteria are the organizer's pinned [`admission-criteria.json`](frontend/shared/admission-criteria.json) with original IDs and precedence.
+
+### Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `NUXT_ANTHROPIC_API_KEY` | Claude key: ignored `.env.local` locally, Worker secret on Cloudflare. Never commit it. |
+| `NUXT_CLAUDE_EXTRACTION_MODEL` / `NUXT_CLAUDE_REVIEW_MODEL` | Defaults `claude-haiku-5-5` / `claude-sonnet-5-5`. |
+| `NUXT_WORKSPACE_ORIGIN`, `NUXT_CLOUDFLARE_ACCESS_*`, `NUXT_WORKSPACE_ALLOWED_EMAILS` | Remote access via Cloudflare Access. |
+| `NUXT_WORKSPACE_PUBLIC_ACCESS` | **Temporary.** `true` skips the Access sign-in check (origin/hostname checks stay). Currently on in `wrangler.jsonc`. |
+| `NUXT_STORAGE_LIMIT_GB` | Stored-PDF cap (default 9 GB). |
+| `NUXT_GOOGLE_DRIVE_*` | Optional Drive packet storage for local servers. |
+
+### Deploying to Cloudflare
+
+`frontend/wrangler.jsonc` runs `npm run build:worker` before every deploy, so `npx wrangler deploy` works from a clean checkout and in Cloudflare's build. Pushing to `main` triggers a deploy.
 
 ```sh
 cd frontend
-npm run build:worker
-npx wrangler deploy --dry-run
-# Sign in, then enter the key at Wrangler's prompt (never in the command itself).
-npx wrangler login --use-keyring
-npm run secret:claude
+npx wrangler login
+npm run secret:claude   # NUXT_ANTHROPIC_API_KEY as a Worker secret (enter it at the prompt)
+npx wrangler deploy
 ```
 
-Alternatively add `NUXT_ANTHROPIC_API_KEY` with type **Secret** under the Worker's **Settings → Runtime variables and secrets → Production**. This is a runtime secret, not a build variable. Keep its value out of `wrangler.jsonc`, Git, logs, and `runtimeConfig.public`. Local Wrangler preview secrets belong in an ignored `.dev.vars`; optional local Nuxt credentials belong in ignored `.env.local` with `npm run dev`. The tracked `.env` must stay empty.
+Workers Logs are enabled for per-request CPU and wall time. `public/local-demo` packets are excluded from builds.
 
-`npm run deploy:worker` builds for Workers and then deploys. The mutation endpoints allow same-origin localhost development; remote requests require the configured HTTPS workspace origin and a verified Cloudflare Access JWT with the configured issuer, audience, expiry and allowed email. Missing Access configuration fails closed. The current in-memory concurrency guard is per Worker isolate, not a global spending limit. This checkout must be reviewed against the production branch before replacing the existing deployed app. Production builds exclude `public/local-demo` packets.
+### Known limits
 
-Cloudflare MCP is an agent-side account-management connection; it is not a runtime dependency and does not carry the Claude key to the browser. The server accesses its own Worker secret directly.
+- **Free plan CPU:** the account is on Workers Free (~10 ms CPU per request). Long analyses can occasionally fail with **Error 1102** ("connection closed"); retry, or move to Workers Paid and add `"limits": { "cpu_ms": 300000 }` to `wrangler.jsonc` (rejected on Free).
+- **Sign-in is off:** anyone with the URL can upload PDFs and run paid analyses. To close it, enable Cloudflare Access on the workers.dev route, set `NUXT_CLOUDFLARE_ACCESS_AUDIENCE` to the Access app's AUD tag, and remove `NUXT_WORKSPACE_PUBLIC_ACCESS`.
+- **One analysis at a time** per server instance; the lock expires after 4 minutes or when the browser disconnects. A concurrent upload gets "Another analysis is running": wait and retry.
+- New applicants, results and edits live in browser memory and reset on reload; stored applicants and saved analyses persist.
 
-For local R2 verification, run `npm run build:worker` then `npm run preview:worker -- --env-file .env.example --port 8787`. Wrangler uses a local emulated R2 bucket by default, so test uploads do not reach production. A normal `npm run dev` has no R2 binding and returns a clear storage-unavailable error. No S3 access key or public bucket URL is needed.
+### API and storage
 
-## Local example packets
+| Route | Purpose |
+| --- | --- |
+| `POST /api/analyze` | Raw PDF body (`x-file-name`, optional `x-patient-name`); streams NDJSON progress, previews and one result |
+| `GET /api/applicants` | List stored applicants |
+| `POST /api/applicants` | Multipart `name` + `file`; stores the PDF |
+| `GET /api/applicants/:id/pdf` | Stored PDF (range requests) |
+| `PATCH /api/applicants/:id` | Update intake details or review status |
+| `POST /api/applicants/:id/analyze` | Analyze a stored PDF and save the result |
+| `GET /api/applicants/:id/analysis` | Saved analysis |
+| `DELETE /api/applicants/:id` | Delete |
+| `POST /api/packets` | Explicit **Save PDF to private storage** |
+
+Backends: **R2** on Cloudflare (bucket `referralready`: `packets/<id>.pdf`, `analyses/<id>.json`, `index.json`); **local disk** by default in development (`frontend/.data/referrals/`, Git-ignored); or **Google Drive** when all `NUXT_GOOGLE_DRIVE_*` values are set (OAuth client + refresh token from the OAuth Playground with the `drive` scope; use a restricted folder approved for patient data). Test the Worker build with a simulated bucket: `npm run build:worker`, then `npm run preview:worker`.
+
+### Local example packets
 
 ```sh
 node scripts/link-demo-pdfs.mjs /path/to/referral-packets
 ```
 
-This discovers `R01.pdf`-style files and creates ignored symlinks and a manifest in `frontend/public/local-demo/`. Each packet is a separate applicant. It does not copy or analyze their contents. Pick an applicant, enter a name, and explicitly select Analyze to send that packet to Claude. R01 initially retains its clearly labeled inventory-only mock review; other packets start pending. Choose **Synthetic flow** for fictional facts and authored source highlights.
+Creates ignored symlinks and a manifest in `frontend/public/local-demo/`, so R01–R11 appear as separate applicants on localhost. They never auto-analyze (use **Analyze with Claude**); R01 starts with a labeled inventory-only mock review.
 
-Local packets are excluded from production output by Nitro's ignore configuration. Keep original packets, packet screenshots, extracted values and credentials out of Git. Applicant records, analysis results and edits remain in browser memory and reset on reload. An explicit **Save PDF to private storage** action persists the original PDF in the private `referralready` R2 bucket, using the `REFERRAL_PDFS` binding. Attaching, previewing and analyzing do not save a PDF to R2. Keys are random `packets/<UUID>.pdf` paths; patient names and source filenames are not stored in keys or metadata. Saved PDFs remain in the bucket after the browser session ends; the current dashboard does not reload saved applicants. Bucket retention and deletion are managed in Cloudflare.
-
-## Review behavior
-
-- Forms are logical sections within the original PDF, with page ranges and links to individual facts.
-- Red marks missing evidence or an unmet requirement; yellow dashed links mark uncertain, conflicting or redacted findings.
-- Every readable fact cites a PDF page and model-reported quote. Claude-located highlight boxes are approximate and labeled as such; verify the page and quote manually.
-- Source criteria IDs and internal-outline precedence are preserved, including conditional arrangements, general eligibility alternatives and case-by-case reviews.
-- Recommendations are **approval**, **not approved**, or **more information needed**. A coordinator confirms the final decision. Missing evidence is not an automatic denial. The completed count is not an admission decision.
-- Corrections preserve original values, add session audit notes, and invalidate the recommendation and affected rule assessments until reviewed.
-
-This is a prototype with same-origin mutation checks, Cloudflare Access enforcement for remote uploads/analysis, and explicit private PDF storage. It has no persistent applicant database or production clinical validation. Each Claude pass is a streamed Anthropic SDK request; the endpoint streams pass-level progress (NDJSON) to the browser and applies only a complete, validated result. Every endpoint (attachment, private storage, Claude analysis) accepts one PDF up to 50 MB. PDFs up to 20 MB are sent inline; larger ones are uploaded through Anthropic's Files API (Messages requests are capped at 32 MB after base64 encoding) and deleted after the analysis. One active analysis per server process, with a 15-minute timeout per Claude pass. Provider page/context limits also apply. **Stop waiting** cancels the browser request and aborts the server's in-flight Claude stream; tokens already generated are still billed.
-
-## Checks
+### Checks
 
 ```sh
 cd frontend
-npm test
+npm test          # contracts, decision tree, streaming scanner, storage, access, credentials
 npm run typecheck
 npm run build
 ```
 
-Contract tests cover source/section/fact/rule links, invalid model output, missing/redacted evidence, precedence, recommendations and provider failures. Live model accuracy must be evaluated separately with a valid replacement key; historical outcome labels are never model inputs.
-
-The only routes remain `/` (applicant dashboard), `/processor`, and `/summary`. See [the integration details](docs/claude-integration.md) and [page boundaries](docs/page-handoff.md).
-
-Read [AGENTS.md](AGENTS.md), the relevant skill in [.agents/skills](.agents/skills), and [the Claude integration boundary](docs/claude-integration.md). The analysis provider is in `frontend/app/services/analysis.ts`; fixtures and state are separate from the screen.
-
-Original referral packets, their contents, generated patient screenshots, credentials, and build output must stay out of Git. The supplied PDFs are external examples and are not included here.
-
-## Three-page scaffold
-
-- `/`: referral intake dashboard: summary counts, search, status/priority filters, sorting, inline review status (Open, In review, Needs info, Approved, Denied — set manually by the coordinator), and a 2-hour review countdown from the received time. **Add applicant** keeps one combined PDF in browser memory, starts Claude analysis immediately, and opens the processor. It does not upload to packet storage. Analysis failures appear in the processor with a retry action; the session applicant remains available until reload. Opening an *Open* referral marks it *In review*.
-- `/processor`: the existing PDF → information nodes → checklist workspace.
-- `/summary`: the active applicant's recommendation (from the decision model, else the staged decision tree over the checklist), discrepancies and gaps, required documents DOC-1–DOC-10, and criteria by decision-tree stage. Clicking any item opens its cited page in the PDF beside it, with the located passage highlighted. Read-only: the coordinator decides.
-
-Use **Continue to summary** after analysis completes. Dashboard **Add applicant** and processor PDF uploads start foreground Claude analysis immediately. New dashboard applicants, their original PDFs, results, and review edits stay in browser memory across route navigation and reset on reload. Explicit **Save PDF to private storage** remains separate. Previously stored applicants still load from the server and can reuse their saved analyses. Page ownership and shared contracts are documented in [the page handoff](docs/page-handoff.md).
-
-## Packet storage
-
-**Add applicant** now starts a session-only analysis without calling these storage routes. The existing packet storage API remains available for previously stored applicants in `frontend/server/`:
-
-| Route | Purpose |
-| --- | --- |
-| `GET /api/applicants` | List stored applicants |
-| `POST /api/applicants` | Multipart `name` + `file`; stores the PDF |
-| `GET /api/applicants/:id/pdf` | Stream the stored PDF to the processor preview |
-| `PATCH /api/applicants/:id` | Update intake details or review status (JSON) |
-| `POST /api/applicants/:id/analyze` | Run Claude on the stored PDF (streamed like `/api/analyze`) and save the result |
-| `GET /api/applicants/:id/analysis` | The saved analysis result |
-| `DELETE /api/applicants/:id` | Delete (local/R2) or move to Drive trash |
-
-**On Cloudflare (the deployed site): R2.** `nuxt.config.ts` declares the R2 bucket `referralready` as the binding `REFERRAL_PACKETS`; Cloudflare's build turns that into the deployed Worker config, so no dashboard binding is needed. PDFs are stored at `packets/<id>.pdf`, saved analyses at `analyses/<id>.json`, and applicant details (with a short analysis summary) in a single `index.json`. Uploads are refused once stored PDFs would exceed `NUXT_STORAGE_LIMIT_GB` (default 9 GB, under R2's 10 GB free tier). Protect the site with Cloudflare Access before storing real referrals: these routes have no login of their own.
-
-To test the Cloudflare build locally with a simulated bucket:
-
-```sh
-cd frontend
-WORKERS_CI=1 NITRO_PRESET=cloudflare_module npx nuxt build
-npx wrangler dev -c .output/server/wrangler.json
-```
-
-**Local development default: local disk.** With no configuration, PDFs and an `index.json` go to `frontend/.data/referrals/` (Git-ignored). This needs no setup but only lives on the machine running the server.
-
-**Optional: Google Drive.** Copy `frontend/.env.example` to `frontend/.env` and fill in all four values; the server then stores and lists packets in one Drive folder (applicant metadata is kept in each file's `appProperties`), so everyone using that server sees the same list.
-
-1. In Google Cloud Console, enable the **Google Drive API**, then create an OAuth client ID (type *Web application*) with `https://developers.google.com/oauthplayground` as an authorized redirect URI.
-2. In the [OAuth Playground](https://developers.google.com/oauthplayground), open the settings gear, choose **Use your own OAuth credentials**, and enter the client ID and secret. Authorize the scope `https://www.googleapis.com/auth/drive`, then exchange the code for tokens and copy the **refresh token**. If the OAuth consent screen is in *Testing* mode, refresh tokens expire after 7 days; publish it, or regenerate the token when it expires.
-3. Create a Drive folder and copy its ID from the URL (`drive.google.com/drive/folders/<FOLDER_ID>`). Shared drives work too.
-4. Restart `npm run dev`. Upload responses show `"storage": "google_drive"`.
-
-Referral packets contain patient information. Use a Drive account and folder your organization has approved for that data, keep sharing restricted, and never commit `.env`. There is no authentication on these routes: run the server only on a trusted machine or network.
+More detail: [AGENTS.md](AGENTS.md), [Claude integration](docs/claude-integration.md), [page handoff](docs/page-handoff.md).
