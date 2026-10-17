@@ -68,7 +68,14 @@ async function renderPage(n: number) {
   try {
     const page = await pdf.getPage(n);
     if (version !== generation || rendered.get(n) !== renderWidth) return;
-    const viewport = page.getViewport({ scale: renderWidth / page.getViewport({ scale: 1 }).width });
+    const natural = page.getViewport({ scale: 1 });
+    // Layout starts from page 1's size; correct this page if it differs (e.g. a landscape page).
+    const known = sizes.value[n - 1];
+    if (known && (Math.abs(known.width - natural.width) > 0.5 || Math.abs(known.height - natural.height) > 0.5)) {
+      sizes.value = sizes.value.map((size, i) => (i === n - 1 ? { width: natural.width, height: natural.height } : size));
+      if (n === target.value) nextTick(() => scrollToPage(n, false));
+    }
+    const viewport = page.getViewport({ scale: renderWidth / natural.width });
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.floor(viewport.width * ratio);
     canvas.height = Math.floor(viewport.height * ratio);
@@ -117,15 +124,20 @@ async function load() {
     const pdfjs = await import("pdfjs-dist");
     if (version !== generation) return;
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-    const loadingTask = (task = pdfjs.getDocument({ url: props.url, useSystemFonts: true }));
+    // Load on demand: with a range-capable server PDF.js fetches only the bytes of the pages shown,
+    // instead of the whole packet before the first page appears.
+    const loadingTask = (task = pdfjs.getDocument({
+      url: props.url, useSystemFonts: true,
+      disableAutoFetch: true, disableStream: true, rangeChunkSize: 256 * 1024,
+    }));
     const document = await loadingTask.promise;
     if (version !== generation) return void loadingTask.destroy();
-    const pages = await Promise.all(Array.from({ length: document.numPages }, (_, i) =>
-      document.getPage(i + 1).then((p) => p.getViewport({ scale: 1 }))));
+    // Size every page like page 1 for now; each page corrects its own size when it renders.
+    const first = (await document.getPage(1)).getViewport({ scale: 1 });
     if (version !== generation) return;
     pdf = document;
     measure();
-    sizes.value = pages.map((v) => ({ width: v.width, height: v.height }));
+    sizes.value = Array.from({ length: document.numPages }, () => ({ width: first.width, height: first.height }));
     loading.value = false;
     await nextTick();
     scrollToPage(target.value, false);

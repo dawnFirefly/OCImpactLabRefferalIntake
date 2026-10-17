@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { H3Event } from "h3";
 
@@ -43,6 +43,8 @@ type PacketStore = {
   update(id: string, fields: Partial<IntakeFields>): Promise<StoredPacket | null>;
   /** PDF bytes, or a stream for stores that support it (R2). */
   read(id: string): Promise<Buffer | ReadableStream | null>;
+  /** `length` bytes from `offset`, for HTTP range requests (the PDF viewer loads pages on demand). */
+  readRange(id: string, offset: number, length: number): Promise<Buffer | ReadableStream | null>;
   remove(id: string): Promise<boolean>;
   /** Saved analysis result (JSON); null when the store has none or cannot cache results. */
   readAnalysis(id: string): Promise<string | null>;
@@ -139,6 +141,18 @@ function localStore(): PacketStore {
         return await readFile(join(files, `${id}.pdf`));
       } catch {
         return null;
+      }
+    },
+    async readRange(id, offset, length) {
+      if (!safeId(id)) return null;
+      const handle = await open(join(files, `${id}.pdf`)).catch(() => null);
+      if (!handle) return null;
+      try {
+        const buffer = Buffer.alloc(length);
+        const { bytesRead } = await handle.read(buffer, 0, length, offset);
+        return buffer.subarray(0, bytesRead);
+      } finally {
+        await handle.close();
       }
     },
     async remove(id) {
@@ -292,6 +306,11 @@ function driveStore(config: DriveConfig): PacketStore {
       const res = await drive(`${api}/${id}?alt=media&supportsAllDrives=true`);
       return res.ok ? Buffer.from(await res.arrayBuffer()) : null;
     },
+    async readRange(id, offset, length) {
+      if (!safeId(id)) return null;
+      const res = await drive(`${api}/${id}?alt=media&supportsAllDrives=true`, { headers: { Range: `bytes=${offset}-${offset + length - 1}` } });
+      return res.ok ? Buffer.from(await res.arrayBuffer()) : null;
+    },
     async remove(id) {
       if (!safeId(id)) return false;
       // Move to Drive trash rather than permanently deleting the referral.
@@ -314,7 +333,7 @@ function driveStore(config: DriveConfig): PacketStore {
 
 /** Minimal slice of the Cloudflare R2 binding API used here. */
 type R2Bucket = {
-  get(key: string): Promise<{ body: ReadableStream; text(): Promise<string>; etag: string } | null>;
+  get(key: string, options?: { range?: { offset: number; length: number } }): Promise<{ body: ReadableStream; text(): Promise<string>; etag: string } | null>;
   put(key: string, value: string | ArrayBuffer | ArrayBufferView, options?: {
     httpMetadata?: { contentType?: string };
     onlyIf?: { etagMatches?: string; etagDoesNotMatch?: string };
@@ -371,6 +390,10 @@ function r2Store(bucket: R2Bucket): PacketStore {
     async read(id) {
       if (!safeId(id)) return null;
       return (await bucket.get(fileKey(id)))?.body ?? null;
+    },
+    async readRange(id, offset, length) {
+      if (!safeId(id)) return null;
+      return (await bucket.get(fileKey(id), { range: { offset, length } }))?.body ?? null;
     },
     async remove(id) {
       if (!safeId(id)) return false;
