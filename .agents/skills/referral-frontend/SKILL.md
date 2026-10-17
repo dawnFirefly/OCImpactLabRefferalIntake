@@ -19,7 +19,9 @@ Use `frontend/app/app.vue` for the composition and graph slots, `useReviewWorksp
 
 ## State and interaction
 
-Use shadcn-vue's source-owned controls in `app/components/ui/` and the existing ReKa-backed Dialog. Attached PDFs are object URLs, not uploaded or parsed. Revoke object URLs on reset/unmount. Display the pending Claude state honestly.
+Use shadcn-vue's source-owned controls in `app/components/ui/` and the existing ReKa-backed Dialog. Attached PDFs are object URLs and are rendered by `PdfSourceViewer.client.vue`, without uploads, OCR, or text extraction. Revoke object URLs on reset/unmount. Display the pending Claude state honestly.
+
+PDF previews use the bundled PDF.js worker. Use document/page/bbox evidence anchors for highlights, not a text-search guess. Synthetic PDFs are generated from fixtures in `lib/demoPdf.ts` and their authored anchors in `data/demo.ts`. Keep those two coordinated. A null anchor displays a page-only preview. Changing source/page or resizing must keep the overlay aligned and cancel superseded renders.
 
 Review adjustments preserve `original_value` and append session audit notes. Checklist completion and applicability counts derive from visible state. No admission outcome is inferred by the frontend.
 

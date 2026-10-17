@@ -235,3 +235,7 @@ frontend/.data/
 .env.*
 !.env.example
 .DS_Store
+
+# Frontend source helpers (the Python template above ignores lib/)
+!frontend/app/lib/
+!frontend/app/lib/**

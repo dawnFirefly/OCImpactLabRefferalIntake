@@ -2,7 +2,7 @@
 
 ## Current state
 
-The app is a frontend-only Nuxt 4 / Vue 3 scaffold using shadcn-vue and Vue Flow. It has no Python server, model client, local OCR, document extraction, or network upload. It starts with fictional demo data. Attaching PDFs creates browser object URLs and replaces the demo with an explicit `awaiting_claude` state. Review edits last for the current component/browser session and reset on reload.
+The app is a frontend-only Nuxt 4 / Vue 3 scaffold using shadcn-vue and Vue Flow. It has no Python server, model client, local OCR, document extraction, or network upload. PDF.js renders pages locally for preview only. It starts with fictional demo data and runtime-generated synthetic PDFs with matching source anchors. Attaching PDFs creates browser object URLs and replaces the demo with an explicit `awaiting_claude` state. Review edits last for the current component/browser session and reset on reload.
 
 ## Extension boundary
 
@@ -29,7 +29,7 @@ Use `Referral` in `frontend/app/types.ts` as the current screen contract. Versio
 - `Fact.rule_ids` and `Rule.fact_ids` express the many-to-many fact/checklist relationship.
 - `original_value` remains intact when a reviewer changes `value`.
 
-The current source-review dialog shows synthetic excerpts. Real PDF page rendering, exact highlights, processing streams, server persistence, and criteria evaluation are future work. Browser preview of an attached file does not analyze its content.
+The source-review dialog renders the cited PDF page and overlays the provided normalized bounding box. It scrolls the highlight into view. Source switching and page navigation are implemented by `PdfSourceViewer.client.vue`. The demo's anchors are authored alongside synthetic PDF rows, not inferred. Processing streams, model-produced evidence/anchors, server persistence, and criteria evaluation are future work. Browser preview of an attached file does not analyze its content.
 
 ## Domain sources for the next task
 

@@ -1,5 +1,6 @@
 import { createDemo } from "../data/demo";
 import type { Referral, Fact, Rule } from "../types";
+import { createDemoPdf } from "../lib/demoPdf";
 
 /** Frontend-only session state. No extraction, network requests, or PDF text parsing. */
 export function useReviewWorkspace() {
@@ -7,10 +8,20 @@ export function useReviewWorkspace() {
   const error = ref("");
   const attachedFiles = shallowRef<File[]>([]);
   const objectUrls: string[] = [];
+  function installDemoPreviews() {
+    for (const document of referral.value.documents) {
+      const url = URL.createObjectURL(
+        createDemoPdf(document, referral.value.evidence),
+      );
+      document.local_url = url;
+      objectUrls.push(url);
+    }
+  }
   function resetDemo() {
     objectUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
     attachedFiles.value = [];
     referral.value = createDemo();
+    installDemoPreviews();
     error.value = "";
   }
   function attach(files: FileList | File[]) {
@@ -29,7 +40,8 @@ export function useReviewWorkspace() {
       error.value = "Attach up to six PDFs for one referral.";
       return;
     }
-    resetDemo();
+    objectUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
+    error.value = "";
     attachedFiles.value = list;
     referral.value = {
       id: crypto.randomUUID(),
@@ -84,6 +96,7 @@ export function useReviewWorkspace() {
     });
   }
   onBeforeUnmount(() => objectUrls.forEach((url) => URL.revokeObjectURL(url)));
+  onMounted(installDemoPreviews);
   return {
     referral,
     error,

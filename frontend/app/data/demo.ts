@@ -1,4 +1,5 @@
 import type { Referral, Fact, Rule } from "../types";
+import { demoRowTop, DEMO_PAGE_HEIGHT } from "../lib/demoPdf";
 
 /** Fictional UI fixtures. Never derived from the supplied referral packets. */
 export function createDemo(): Referral {
@@ -140,6 +141,22 @@ export function createDemo(): Referral {
     fact_ids: [f.id],
     note: "",
   }));
+  // Exact anchors are authored alongside the fictional PDF rows, never inferred.
+  for (const document of documents) {
+    for (let page = 1; page <= document.page_count; page++) {
+      evidence
+        .filter((e) => e.document_id === document.id && e.page === page)
+        .forEach((e, index) => {
+          const top = demoRowTop(index);
+          e.bbox = [
+            48 / 600,
+            (top - 18) / DEMO_PAGE_HEIGHT,
+            552 / 600,
+            (top + 13) / DEMO_PAGE_HEIGHT,
+          ];
+        });
+    }
+  }
   for (const [id, text] of [
     ["glucose", "Glucose"],
     ["creatinine", "Creatinine"],

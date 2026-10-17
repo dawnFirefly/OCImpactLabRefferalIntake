@@ -24,8 +24,9 @@ Open [localhost:3000](http://127.0.0.1:3000).
 - Checklist expansion, completion counts, and session-local status adjustments.
 - Information review/correction with original values preserved.
 - Browser-local PDF attachments and PDF preview, with an explicit **Awaiting Claude** state.
+- Clickable document previews, page navigation, and highlighted source sections in the review dialog. The synthetic PDFs and their exact anchors are generated together in the browser.
 
-PDFs are not parsed, analyzed, or uploaded. Model analysis, real source highlighting, persistent storage, and admission decisions are not implemented. Refreshing resets the frontend demo.
+PDF.js renders PDFs locally for display; it does not extract patient facts or perform OCR. Documents are not analyzed or uploaded. Model analysis, persistent storage, and admission decisions are not implemented. Uploaded PDFs can be previewed; real evidence highlights require anchors from the future Claude integration. Refreshing resets the frontend demo.
 
 ## Checks
 

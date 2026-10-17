@@ -185,6 +185,11 @@ function demo() {
   graphPage.value = 0;
   group.value = "All factors";
 }
+function openDocument(doc: PacketDocument) {
+  selectedDoc.value = doc.id;
+  previewDocument.value = doc;
+  previewOpen.value = true;
+}
 function selectFact(f: Fact) {
   selectedFact.value = f.id;
   nextTick(drawOutputs);
@@ -311,7 +316,8 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
               class="file-row"
               :class="{ active: selectedDoc === doc.id }"
               :aria-pressed="selectedDoc === doc.id"
-              @click="selectedDoc = selectedDoc === doc.id ? null : doc.id"
+              @click="openDocument(doc)"
+              :aria-label="`Preview ${doc.name}`"
             >
               <span class="file-icon"><FileText :size="17" /></span>
               <div>
@@ -323,18 +329,8 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
                       : "Attached · awaiting Claude"
                   }}
                 </div>
-              </div></button
-            ><Button
-              v-if="doc.local_url"
-              variant="ghost"
-              size="sm"
-              class="mb-2 ml-2"
-              @click="
-                previewDocument = doc;
-                previewOpen = true;
-              "
-              >Preview PDF</Button
-            >
+              </div>
+            </button>
           </div>
         </div>
         <label
@@ -632,6 +628,15 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
                 >
               </div>
             </div>
+            <ClientOnly>
+              <PdfSourceViewer
+                v-if="currentEvidence && currentDocument?.local_url"
+                :url="currentDocument.local_url"
+                :title="currentDocument.name"
+                :page="currentEvidence.page"
+                :bbox="currentEvidence.bbox"
+              />
+            </ClientOnly>
             <div v-if="currentEvidence" class="evidence-quote">
               {{ currentEvidence.quote }}
             </div>
@@ -639,8 +644,8 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
               No supporting information in this example.
             </div>
             <p class="audit-note">
-              Synthetic source excerpt. Real PDF reading, exact highlights, and
-              streaming results will come from the future Claude integration.
+              Synthetic PDF and authored source highlight. Future Claude results
+              can use the same document, page, and section-anchor contract.
             </p>
           </div>
           <div>
@@ -695,19 +700,16 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
       ><DialogContent class="inspector"
         ><DialogHeader
           ><DialogTitle>{{ previewDocument?.name }}</DialogTitle
-          ><DialogDescription
-            >Browser preview only. This file has not been analyzed or sent to a
-            model.</DialogDescription
-          ></DialogHeader
-        ><iframe
-          v-if="previewDocument?.local_url"
-          :src="previewDocument.local_url"
-          title="Attached PDF preview"
-          style="
-            width: 100%;
-            height: 65vh;
-            border: 1px solid #ddd;
-          " /></DialogContent
+          ><DialogDescription>{{
+            previewDocument?.status === "demo"
+              ? "Synthetic example PDF."
+              : "Browser preview only. This file has not been analyzed or sent to a model."
+          }}</DialogDescription></DialogHeader
+        ><ClientOnly
+          ><PdfSourceViewer
+            v-if="previewDocument?.local_url"
+            :url="previewDocument.local_url"
+            :title="previewDocument.name" /></ClientOnly></DialogContent
     ></Dialog>
   </main>
 </template>
