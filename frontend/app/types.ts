@@ -41,7 +41,7 @@ export type PacketDocument = {
   pages: { number: number; rotation: number; method: string; error?: string }[];
   local_url?: string;
 };
-export type ReviewStatus = "new" | "in_review" | "needs_info" | "approved" | "denied" | "completed";
+export type ReviewStatus = "new" | "in_review" | "needs_info" | "approved" | "denied";
 /** Coordinator-entered intake details for a stored applicant (not model output). */
 export type Intake = {
   receivedAt: string;

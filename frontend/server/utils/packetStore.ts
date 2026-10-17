@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-export const REVIEW_STATUSES = ["new", "in_review", "needs_info", "approved", "denied", "completed"] as const;
+export const REVIEW_STATUSES = ["new", "in_review", "needs_info", "approved", "denied"] as const;
 export const PRIORITIES = ["routine", "urgent"] as const;
 
 /** Coordinator-entered intake details. Everything except the name is optional. */
@@ -73,8 +73,10 @@ export function parseIntake(input: Record<string, unknown>, partial: boolean): P
 function normalize(packet: Partial<StoredPacket> & { id: string }): StoredPacket {
   return {
     name: "", fileName: "", size: 0, uploadedAt: "", storage: "local",
-    source: "", contact: "", reviewer: "", notes: "", priority: "routine", reviewStatus: "new",
+    source: "", contact: "", reviewer: "", notes: "", priority: "routine",
     ...packet,
+    // Statuses that no longer exist (e.g. the removed "completed") fall back to Open.
+    reviewStatus: REVIEW_STATUSES.includes(packet.reviewStatus as never) ? packet.reviewStatus : "new",
     receivedAt: packet.receivedAt || packet.uploadedAt || "",
   } as StoredPacket;
 }

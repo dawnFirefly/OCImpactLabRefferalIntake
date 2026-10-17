@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, Clock, Inbox, MoreHorizontal, Pencil, Plus, Search, Trash2, XCircle } from "@lucide/vue";
+import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, CircleHelp, Clock, EllipsisVertical, Eye, Inbox, Pencil, Plus, Search, Trash2, XCircle } from "@lucide/vue";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { Referral, ReviewStatus } from "~/types";
 import { REVIEW_WINDOW_MS } from "~/composables/useReviewWorkspace";
@@ -40,16 +40,15 @@ onMounted(async () => {
 onBeforeUnmount(() => clearInterval(timer));
 
 const STATUS: Record<ReviewStatus, { label: string; class: string }> = {
-  new: { label: "New", class: "bg-sky-50 text-sky-800 border-sky-200" },
+  new: { label: "Open", class: "bg-sky-50 text-sky-800 border-sky-200" },
   in_review: { label: "In review", class: "bg-violet-50 text-violet-800 border-violet-200" },
   needs_info: { label: "Needs info", class: "bg-amber-50 text-amber-800 border-amber-200" },
   approved: { label: "Approved", class: "bg-emerald-50 text-emerald-800 border-emerald-200" },
   denied: { label: "Denied", class: "bg-red-50 text-red-700 border-red-200" },
-  completed: { label: "Completed", class: "bg-muted text-muted-foreground border-border" },
 };
-const STATUS_ORDER: ReviewStatus[] = ["new", "in_review", "needs_info", "approved", "denied", "completed"];
+const STATUS_ORDER: ReviewStatus[] = ["new", "in_review", "needs_info", "approved", "denied"];
 /** Coordinator-recorded outcomes. These stop the review clock; nothing sets them automatically. */
-const CLOSED: ReviewStatus[] = ["approved", "denied", "completed"];
+const CLOSED: ReviewStatus[] = ["approved", "denied"];
 
 type Row = Referral & { intake: NonNullable<Referral["intake"]> };
 const stored = computed(() => applicants.value.filter((a): a is Row => !!a.intake));
@@ -77,17 +76,20 @@ function formatReceived(iso: string) {
     : d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-// Summary counts (also act as quick filters)
-const stats = computed(() => {
-  const open = stored.value.filter(isOpen);
-  return {
-    open: open.length,
-    dueSoon: open.filter((r) => remaining(r) >= 0 && remaining(r) < 30 * 60_000).length,
-    overdue: open.filter((r) => remaining(r) < 0).length,
-    approved: stored.value.filter((r) => r.intake.reviewStatus === "approved").length,
-    denied: stored.value.filter((r) => r.intake.reviewStatus === "denied").length,
-  };
-});
+// One summary card per status; clicking a card toggles that status filter.
+const CARD_STYLE: Record<ReviewStatus, { icon: unknown; tone: string }> = {
+  new: { icon: Inbox, tone: "text-sky-800" },
+  in_review: { icon: Eye, tone: "text-violet-800" },
+  needs_info: { icon: CircleHelp, tone: "text-amber-700" },
+  approved: { icon: CheckCircle2, tone: "text-emerald-700" },
+  denied: { icon: XCircle, tone: "text-red-700" },
+};
+const cards = computed(() => STATUS_ORDER.map((key) => ({
+  key,
+  label: STATUS[key].label,
+  value: stored.value.filter((r) => r.intake.reviewStatus === key).length,
+  ...CARD_STYLE[key],
+})));
 
 // Filters and sorting
 const search = ref("");
@@ -108,11 +110,7 @@ const rows = computed(() => {
   const q = search.value.trim().toLowerCase();
   const list = stored.value.filter((r) => {
     const s = r.intake.reviewStatus;
-    if (statusFilter.value === "open" && !isOpen(r)) return false;
-    if (statusFilter.value === "closed" && isOpen(r)) return false;
-    if (statusFilter.value === "overdue" && !(isOpen(r) && remaining(r) < 0)) return false;
-    if (statusFilter.value === "due_soon" && !(isOpen(r) && remaining(r) >= 0 && remaining(r) < 30 * 60_000)) return false;
-    if (STATUS_ORDER.includes(statusFilter.value as ReviewStatus) && s !== statusFilter.value) return false;
+    if (statusFilter.value !== "all" && s !== statusFilter.value) return false;
     if (priorityFilter.value !== "all" && r.intake.priority !== priorityFilter.value) return false;
     if (!q) return true;
     return [r.title, r.documents[0]?.name, r.intake.source, r.intake.reviewer, r.intake.contact]
@@ -120,7 +118,7 @@ const rows = computed(() => {
   });
   const received = (r: Row) => new Date(r.intake.receivedAt).getTime();
   const compare: Record<string, (a: Row, b: Row) => number> = {
-    // Open referrals by deadline first; closed ones sink to the bottom.
+    // Undecided referrals by deadline first; approved/denied sink to the bottom.
     due: (a, b) => Number(!isOpen(a)) - Number(!isOpen(b)) || dueAt(a) - dueAt(b),
     newest: (a, b) => received(b) - received(a),
     oldest: (a, b) => received(a) - received(b),
@@ -182,13 +180,7 @@ function open(r: Referral) {
 
     <section class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5" aria-label="Summary">
       <Card
-        v-for="card in [
-          { key: 'open', label: 'Open referrals', value: stats.open, icon: Inbox, tone: 'text-foreground' },
-          { key: 'due_soon', label: 'Due within 30 min', value: stats.dueSoon, icon: Clock, tone: 'text-amber-700' },
-          { key: 'overdue', label: 'Overdue', value: stats.overdue, icon: AlertTriangle, tone: 'text-red-700' },
-          { key: 'approved', label: 'Approved', value: stats.approved, icon: CheckCircle2, tone: 'text-emerald-700' },
-          { key: 'denied', label: 'Denied', value: stats.denied, icon: XCircle, tone: 'text-red-700' },
-        ]"
+        v-for="card in cards"
         :key="card.key"
         role="button"
         tabindex="0"
@@ -200,7 +192,7 @@ function open(r: Referral) {
       >
         <CardHeader class="px-4">
           <CardDescription class="text-xs font-medium">{{ card.label }}</CardDescription>
-          <CardAction><component :is="card.icon" class="size-4" :class="card.tone" /></CardAction>
+          <CardAction><component :is="card.icon as any" class="size-4" :class="card.tone" /></CardAction>
         </CardHeader>
         <CardContent class="px-4">
           <CardTitle class="text-2xl font-semibold tabular-nums" :class="card.tone">{{ card.value }}</CardTitle>
@@ -223,11 +215,8 @@ function open(r: Referral) {
         <Select v-model="statusFilter">
           <SelectTrigger class="w-[170px]" aria-label="Filter by status"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All referrals</SelectItem>
-            <SelectItem value="open">All open</SelectItem>
-            <SelectItem value="closed">All closed</SelectItem>
-            <SelectItem value="overdue">Overdue</SelectItem>
-            <SelectItem value="due_soon">Due within 30 min</SelectItem>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectSeparator />
             <SelectItem v-for="s in STATUS_ORDER" :key="s" :value="s">{{ STATUS[s].label }}</SelectItem>
           </SelectContent>
         </Select>
@@ -299,7 +288,7 @@ function open(r: Referral) {
                   <Button variant="outline" size="sm" @click="open(r)">Review<ArrowRight class="size-3.5" /></Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger as-child>
-                      <Button variant="ghost" size="icon" :aria-label="`More actions for ${r.title}`"><MoreHorizontal class="size-4" /></Button>
+                      <Button variant="ghost" size="icon" :aria-label="`More actions for ${r.title}`"><EllipsisVertical class="size-4" /></Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem @select="edit(r)"><Pencil />Edit details</DropdownMenuItem>

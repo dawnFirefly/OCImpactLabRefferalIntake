@@ -18,7 +18,7 @@ Shared files (`app.vue`, `layouts/default.vue`, `composables/useReviewWorkspace.
 - `referral`: active applicant and current facts/checklist/audit.
 - `selectApplicant(id)`: activates an existing record without discarding edits.
 - `addApplicant(name)`: adds and selects an empty record with `awaiting_pdf` status. It does not create a backend record.
-- `loadStoredApplicants()`, `createStoredApplicant(fields, file)`, `updateStoredApplicant(id, fields)`, `deleteStoredApplicant(id)`: server-persisted applicants (`stored-<id>` records with `intake` details; document `local_url` is `/api/applicants/<id>/pdf`). Review status (`new`, `in_review`, `needs_info`, `approved`, `denied`, `completed`) is set only by a coordinator. `approved`/`denied` record the coordinator's decision; never set them from model output or checklist counts.
+- `loadStoredApplicants()`, `createStoredApplicant(fields, file)`, `updateStoredApplicant(id, fields)`, `deleteStoredApplicant(id)`: server-persisted applicants (`stored-<id>` records with `intake` details; document `local_url` is `/api/applicants/<id>/pdf`). Review status (`new` shown as "Open", `in_review`, `needs_info`, `approved`, `denied`) is set only by a coordinator. `approved`/`denied` record the coordinator's decision; never set them from model output or checklist counts.
 - Existing `attach`, `updateFact`, and `updateRule` mutate session data. One combined PDF per applicant. Upload on a new empty record retains its ID/name.
 - Object URLs live for the root session and are revoked on root unmount. Only stored applicants and their PDFs persist; review edits do not.
 
