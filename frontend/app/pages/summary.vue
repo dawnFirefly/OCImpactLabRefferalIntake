@@ -54,6 +54,11 @@ const decision = computed(() => {
   return { label: outcomeLabels[t.outcome], stage: t.stage?.number ?? null, tone, source: "Staged IHH decision tree over the current checklist",
     reasons: t.rule_ids.map((id) => `${id}: ${ruleById.value.get(id)?.note || "Review this criterion."}`) };
 });
+/** The banner leads with the deciding reasons; the full list is one click away. */
+const REASONS_SHOWN = 4;
+const showAllReasons = ref(false);
+watch(() => referral.value.id, () => (showAllReasons.value = false));
+const visibleReasons = computed(() => (showAllReasons.value ? decision.value?.reasons : decision.value?.reasons.slice(0, REASONS_SHOWN)) || []);
 const stageTitle = (n: number | null) => tree.value.stages.find((s) => s.stage.number === n)?.stage.title || "";
 /** Reasons arrive as "RULE-ID: note"; split so the ID can link to its evidence. */
 function splitReason(reason: string) {
@@ -215,7 +220,7 @@ const toneClass = (tone: Tone) => `tone-${tone}`;
             <span v-if="decision.stage" class="text-sm text-muted-foreground">Stage {{ decision.stage }} · {{ stageTitle(decision.stage) }}</span>
           </div>
           <ul class="mt-3 space-y-1.5 pl-1">
-            <li v-for="(reason, i) in decision.reasons" :key="i" class="flex gap-2 text-sm">
+            <li v-for="(reason, i) in visibleReasons" :key="i" class="flex gap-2 text-sm">
               <span class="mt-2 size-1.5 shrink-0 rounded-full bg-current opacity-50" />
               <span>
                 <button v-if="splitReason(reason).id" type="button" class="rule-link" @click="select(`reason-${i}`, splitReason(reason).id, [splitReason(reason).id])">{{ splitReason(reason).id }}</button>
@@ -223,6 +228,9 @@ const toneClass = (tone: Tone) => `tone-${tone}`;
               </span>
             </li>
           </ul>
+          <Button v-if="decision.reasons.length > REASONS_SHOWN" variant="link" size="sm" class="mt-1 h-auto px-0 text-xs" @click="showAllReasons = !showAllReasons">
+            {{ showAllReasons ? "Show fewer" : `Show all ${decision.reasons.length} reasons` }}
+          </Button>
           <p class="mt-3 text-xs text-muted-foreground">{{ decision.source }} · the coordinator makes the final decision.</p>
         </div>
 
