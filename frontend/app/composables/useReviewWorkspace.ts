@@ -1,13 +1,137 @@
+import { claudeProvider, type AnalysisProgress, type AnalysisPreview } from "../services/analysis";
+import { uploadPacket } from "../services/storage";
 import { createR01Mock } from "../data/r01Mock";
 import { createDemo } from "../data/demo";
 import type { Referral, Fact, Rule, PacketDocument } from "../types";
 import { createDemoPdf } from "../lib/demoPdf";
+import { criteriaPrecedence, criteriaSource, unreviewedRules } from "#shared/decision-tree";
+import { maxPacketBytes } from "#shared/upload-limits";
 
-/** Frontend-only session state. No extraction, model requests, or PDF text extraction. */
+/** The full staged rubric with no findings: Application review shows every criterion before analysis. */
+function rubric(status: "not_reviewed" | "pending" = "not_reviewed"): Referral["checklist"] {
+  return { precedence: criteriaPrecedence, source_url: criteriaSource, rules: unreviewedRules().map((r) => ({ ...r, status })), counts: {} };
+}
+
+/** Session-local state; R2 saving and Claude analysis each require an explicit action. */
 export function useReviewWorkspace() {
   const referral = ref<Referral>(createDemo());
   const applicants = ref<Referral[]>([]);
   const error = ref("");
+  const patientName = ref("");
+  const analyzing = ref(false);
+  const savingPdf = ref(false);
+  let uploadController: AbortController | null = null;
+  const progress = ref<AnalysisProgress | null>(null);
+  const filesByApplicant = new Map<string, File>();
+  const namesByApplicant = new Map<string, string>();
+  let controller: AbortController | null = null;
+  /** Workspace before a running analysis; restored if it fails or is cancelled. */
+  let beforeAnalysis: Referral | null = null;
+  async function sourceFile(current: Referral, signal: AbortSignal): Promise<File> {
+    const attached = filesByApplicant.get(current.id);
+    if (attached) return attached;
+    const document = current.documents[0];
+    if (!document?.local_url?.match(/^\/local-demo\/R\d{2}\.pdf$/)) throw new Error("Attach a PDF first.");
+    const response = await fetch(document.local_url, { signal });
+    if (!response.ok) throw new Error("The local PDF is unavailable. Attach it again.");
+    const blob = await response.blob();
+    if (blob.size > maxPacketBytes) throw new Error("Choose a PDF up to 50 MB.");
+    return new File([blob], document.name, { type: "application/pdf" });
+  }
+  async function savePdf() {
+    const current = referral.value;
+    const document = current.documents[0];
+    if (savingPdf.value || analyzing.value || !document || document.storage || mode.value === "synthetic") return;
+    const request = new AbortController();
+    uploadController = request;
+    savingPdf.value = true;
+    error.value = "";
+    try {
+      const file = await sourceFile(current, request.signal);
+      const stored = await uploadPacket(file, request.signal);
+      document.storage = stored;
+    } catch (failure) {
+      if (!request.signal.aborted && referral.value.id === current.id) {
+        error.value = failure instanceof Error ? failure.message : "The PDF could not be saved. Please retry.";
+      }
+    } finally {
+      if (uploadController === request) { uploadController = null; savingPdf.value = false; }
+    }
+  }
+  function restoreBeforeAnalysis() {
+    if (beforeAnalysis && referral.value.status === "analyzing" && referral.value.id === beforeAnalysis.id) {
+      referral.value = beforeAnalysis;
+      rememberApplicant();
+    }
+    beforeAnalysis = null;
+  }
+  function cancelAnalysis() {
+    controller?.abort();
+    controller = null;
+    analyzing.value = false;
+    progress.value = null;
+    restoreBeforeAnalysis();
+  }
+  /** A provisional workspace that fills with streamed, unvalidated nodes while Claude writes. */
+  function startPreview(current: Referral, name: string) {
+    const source = current.documents[0];
+    beforeAnalysis = current;
+    referral.value = {
+      id: current.id, title: name, status: "analyzing", revision: current.revision,
+      documents: [{ id: "source-pdf", name: source?.name || "applicant.pdf", page_count: source?.page_count ?? null, status: "analyzing", error: null, pages: [], local_url: source?.local_url, storage: source?.storage }],
+      sections: [], facts: [], evidence: [], error: null, audit: [],
+      checklist: rubric("pending"),
+    };
+  }
+  function applyPreview(event: AnalysisPreview) {
+    const live = referral.value;
+    if (live.status !== "analyzing") return;
+    if (event.type === "section") live.sections!.push(event.section);
+    else if (event.type === "fact") { live.facts.push(event.fact); live.evidence.push(...event.evidence); }
+    else if (event.type === "criteria") live.checklist.rules = event.rules;
+    else if (event.type === "rule") {
+      const rule = live.checklist.rules.find((r) => r.id === event.rule.id);
+      if (!rule) return;
+      Object.assign(rule, event.rule);
+      for (const fact of live.facts) if (rule.fact_ids.includes(fact.id) && !fact.rule_ids.includes(rule.id)) fact.rule_ids.push(rule.id);
+    } else if (event.stage === "extracting") { live.sections = []; live.facts = []; live.evidence = []; }
+    else {
+      live.checklist.rules.forEach((r) => Object.assign(r, { status: "pending", fact_ids: [], note: "" }));
+      live.facts.forEach((f) => { f.rule_ids = []; });
+    }
+  }
+  async function analyze() {
+    if (analyzing.value || savingPdf.value) return;
+    const current = referral.value;
+    // The name is optional: Claude reads it from the PDF. When given, it is checked against the packet.
+    const name = patientName.value.trim();
+    error.value = "";
+    if (name) namesByApplicant.set(current.id, name);
+    analyzing.value = true;
+    const request = new AbortController();
+    controller = request;
+    try {
+      const file = await sourceFile(current, request.signal);
+      startPreview(current, name || current.title);
+      const result = await claudeProvider.analyze(file, name, {
+        onProgress: (update) => { if (controller === request) progress.value = update; },
+        onPreview: (event) => { if (controller === request) applyPreview(event); },
+      }, request.signal);
+      if (request.signal.aborted || referral.value.id !== current.id) return;
+      beforeAnalysis = null;
+      result.id = current.id;
+      result.documents[0]!.local_url = current.documents[0]?.local_url;
+      result.documents[0]!.storage = current.documents[0]?.storage;
+      referral.value = result;
+      rememberApplicant();
+    } catch (failure) {
+      if (request.signal.aborted) return;
+      restoreBeforeAnalysis();
+      error.value = failure instanceof Error ? failure.message : "Analysis failed. Try again.";
+    } finally {
+      if (controller === request) { analyzing.value = false; progress.value = null; controller = null; }
+    }
+  }
   const attachedFiles = shallowRef<File[]>([]);
   const mode = ref<"synthetic" | "provided" | "attached">("synthetic");
   const providedDocuments = ref<PacketDocument[]>([]);
@@ -29,21 +153,28 @@ export function useReviewWorkspace() {
   function selectApplicant(id: string) {
     const applicant = applicants.value.find((a) => a.id === id);
     if (!applicant) return;
+    cancelAnalysis();
     referral.value = applicant;
+    patientName.value = namesByApplicant.get(id) || (applicant.status === "analyzed" || applicant.status === "awaiting_pdf" ? applicant.title : "");
     mode.value = id === "synthetic-demo" ? "synthetic" : id.startsWith("provided-") ? "provided" : "attached";
     error.value = "";
   }
   function addApplicant(name: string) {
+    cancelAnalysis();
+    patientName.value = name.trim();
     referral.value = {
       id: crypto.randomUUID(), title: name.trim(), status: "awaiting_pdf", revision: 0,
       documents: [], facts: [], evidence: [], error: null, audit: [],
-      checklist: { precedence: "", source_url: "", rules: [], counts: {} },
+      checklist: rubric(),
     };
     mode.value = "attached";
+    namesByApplicant.set(referral.value.id, name.trim());
     rememberApplicant();
     return referral.value.id;
   }
   function resetDemo() {
+    cancelAnalysis();
+    patientName.value = "";
     attachedFiles.value = [];
     referral.value = createDemo();
     installDemoPreviews();
@@ -52,11 +183,13 @@ export function useReviewWorkspace() {
     rememberApplicant();
   }
   function useProvidedDocument(document: PacketDocument) {
+    cancelAnalysis();
+    patientName.value = "";
     attachedFiles.value = [];
     mode.value = "provided";
     error.value = "";
     const existing = applicants.value.find((a) => a.id === document.id);
-    if (existing) { referral.value = existing; return; }
+    if (existing) { referral.value = existing; patientName.value = namesByApplicant.get(existing.id) || ""; return; }
     // Every supplied packet is a separate referral, never one combined patient.
     referral.value = document.id === "provided-R01" ? createR01Mock(document) : {
       id: document.id,
@@ -68,7 +201,7 @@ export function useReviewWorkspace() {
       evidence: [],
       error: null,
       audit: [],
-      checklist: { precedence: "", source_url: "", rules: [], counts: {} },
+      checklist: rubric(),
     };
     rememberApplicant();
   }
@@ -81,7 +214,7 @@ export function useReviewWorkspace() {
       providedDocuments.value = entries
         .filter(
           (entry) =>
-            ["R01", "R02"].includes(entry.id) &&
+            /^R\d{2}$/.test(entry.id) &&
             entry.url === `/local-demo/${entry.id}.pdf`,
         )
         .map((entry) => ({
@@ -105,10 +238,10 @@ export function useReviewWorkspace() {
     if (
       list.some(
         (f) =>
-          !f.name.toLowerCase().endsWith(".pdf") || f.size > 50 * 1024 * 1024,
+          !f.name.toLowerCase().endsWith(".pdf") || f.size > maxPacketBytes,
       )
     ) {
-      error.value = "Choose PDF files up to 50 MB each.";
+      error.value = "Choose one PDF up to 50 MB.";
       return;
     }
     if (list.length !== 1) {
@@ -116,6 +249,9 @@ export function useReviewWorkspace() {
       return;
     }
     error.value = "";
+    cancelAnalysis();
+    // Only a dashboard-named applicant carries a name to check; otherwise Claude reads it from the PDF.
+    patientName.value = referral.value.status === "awaiting_pdf" ? namesByApplicant.get(referral.value.id) || "" : "";
     attachedFiles.value = list;
     mode.value = "attached";
     referral.value = {
@@ -140,13 +276,25 @@ export function useReviewWorkspace() {
       evidence: [],
       error: null,
       audit: [],
-      checklist: { precedence: "", source_url: "", rules: [], counts: {} },
+      checklist: rubric(),
     } as Referral;
+    filesByApplicant.set(referral.value.id, list[0]!);
     rememberApplicant();
+    // Uploading is the coordinator's explicit request: start the Claude analysis immediately.
+    void analyze();
+  }
+  function invalidateRecommendation() {
+    if (!referral.value.recommendation) return;
+    referral.value.recommendation = { status: "needs_information", reasons: ["Coordinator edits changed the review. Recheck linked requirements before a final decision."], rule_ids: [] };
   }
   function updateFact(fact: Fact, value: string, note: string, status: string) {
     const current = referral.value.facts.find((f) => f.id === fact.id);
     if (!current) return;
+    invalidateRecommendation();
+    for (const rule of referral.value.checklist.rules.filter(r => r.fact_ids.includes(current.id))) {
+      rule.status = "uncertain";
+      rule.note = "Linked fact changed by coordinator; reassess this requirement.";
+    }
     current.value = value;
     current.review_note = note;
     current.status = status;
@@ -162,6 +310,7 @@ export function useReviewWorkspace() {
       (r) => r.id === rule.id,
     );
     if (!current) return;
+    invalidateRecommendation();
     current.status = status;
     current.note = note;
     referral.value.audit.push({
@@ -171,7 +320,7 @@ export function useReviewWorkspace() {
       note,
     });
   }
-  onBeforeUnmount(() => objectUrls.forEach((url) => URL.revokeObjectURL(url)));
+  onBeforeUnmount(() => { cancelAnalysis(); uploadController?.abort(); objectUrls.forEach((url) => URL.revokeObjectURL(url)); });
   onMounted(() => {
     installDemoPreviews();
     rememberApplicant();
@@ -179,6 +328,13 @@ export function useReviewWorkspace() {
   });
   return {
     referral,
+    patientName,
+    analyzing,
+    savingPdf,
+    savePdf,
+    progress,
+    analyze,
+    cancelAnalysis,
     applicants,
     selectApplicant,
     addApplicant,

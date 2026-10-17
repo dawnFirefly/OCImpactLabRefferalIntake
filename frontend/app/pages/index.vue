@@ -15,7 +15,7 @@ function open(id: string) {
   navigateTo("/processor");
 }
 function status(value: string) {
-  return ({ demo: "Synthetic demo", mock_review: "Mock review ready", awaiting_pdf: "Needs PDF", awaiting_claude: "Awaiting analysis" } as Record<string, string>)[value] || "In review";
+  return ({ demo: "Synthetic demo", mock_review: "Mock review ready", analyzed: "Claude reviewed", awaiting_pdf: "Needs PDF", awaiting_claude: "Awaiting analysis" } as Record<string, string>)[value] || "In review";
 }
 </script>
 

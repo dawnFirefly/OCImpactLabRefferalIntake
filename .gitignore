@@ -224,6 +224,10 @@ frontend/node_modules/
 frontend/.nuxt/
 frontend/.output/
 frontend/.data/
+frontend/.wrangler/
+.dev.vars
+.dev.vars.*
+.env
 
 # Local referral files and secrets
 *.pdf

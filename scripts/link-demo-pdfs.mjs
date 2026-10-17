@@ -1,5 +1,6 @@
 import {
   access,
+  readdir,
   mkdir,
   lstat,
   readlink,
@@ -21,10 +22,12 @@ const target = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../frontend/public/local-demo",
 );
-const entries = [
-  { id: "R01", page_count: 34 },
-  { id: "R02", page_count: 22 },
-];
+const knownPages = { R01: 34, R02: 22 };
+const entries = (await readdir(source))
+  .filter(name => /^R\d{2}\.pdf$/.test(name))
+  .sort()
+  .map(name => ({ id: name.slice(0, -4), page_count: knownPages[name.slice(0, -4)] ?? null }));
+if (!entries.length) throw new Error("No R01.pdf-style referral packets found in this folder.");
 for (const entry of entries) await access(resolve(source, entry.id + ".pdf"));
 await mkdir(target, { recursive: true });
 for (const entry of entries) {
@@ -51,5 +54,5 @@ await writeFile(
   ),
 );
 console.log(
-  "Linked R01 and R02 for local PDF preview. No PDF bytes were copied or analyzed. Local demo links and metadata are Git-ignored.",
+  `Linked ${entries.length} separate referral PDFs for local preview. No PDF bytes were copied or analyzed. Links and metadata are Git-ignored.`,
 );

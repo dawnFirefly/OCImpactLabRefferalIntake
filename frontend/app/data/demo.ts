@@ -24,7 +24,7 @@ export function createDemo(): Referral {
     [
       "insurance",
       "Insurance type",
-      "Personal information",
+      "Financial information",
       "Medi-Cal",
       "",
       [1, 3],
@@ -94,6 +94,8 @@ export function createDemo(): Referral {
       "×10³/µL",
       [2],
     ],
+    ["housing", "Housing situation", "Housing information", "At risk of homelessness", "", [3]],
+    ["address", "Discharge address", "Housing information", "Unclear in scan", "", [3]],
   ] as const;
   const evidence: Referral["evidence"] = [];
   const facts: Fact[] = definitions.map(
@@ -123,7 +125,7 @@ export function createDemo(): Referral {
         evidence_ids: ids,
         rule_ids: [key],
         kind: "demo",
-        status: "confirmed",
+        status: key === "address" ? "uncertain" : "confirmed",
         review_note: "",
         discrepancy: undefined,
       };
@@ -134,7 +136,7 @@ export function createDemo(): Referral {
     text: f.label,
     kind: "field",
     section: f.group,
-    status: "met",
+    status: f.status === "uncertain" ? "uncertain" : "met",
     fact_ids: [f.id],
     note: "",
   }));
@@ -166,7 +168,7 @@ export function createDemo(): Referral {
       text: text!,
       kind: "field",
       section: "Labs & vitals",
-      status: "unknown",
+      status: "missing",
       fact_ids: [],
       note: "",
     });
@@ -177,6 +179,13 @@ export function createDemo(): Referral {
     status: "demo",
     revision: 0,
     documents,
+    sections: [...new Set(facts.map(f => f.group))].map((group, index) => {
+      const sectionId = `demo-section-${index}`;
+      const members = facts.filter(f => f.group === group);
+      members.forEach(f => { f.section_ids = [sectionId]; });
+      return { id: sectionId, document_id: documents[0]!.id, title: group === "Personal information" ? "Application form" : group === "Labs & vitals" ? "Lab results & vitals" : group,
+        category: group, pages: [...new Set(members.flatMap(f => f.evidence_ids.map(id => evidence.find(e => e.id === id)!.page)))], status: "found" as const };
+    }),
     facts,
     evidence,
     error: null,
@@ -186,7 +195,7 @@ export function createDemo(): Referral {
         "Illustrative UI fields only; the future Claude integration will use validated IHH rules.",
       source_url: "",
       rules,
-      counts: { met: 12, unknown: 5 },
+      counts: { met: rules.filter(r => r.status === "met").length, missing: 5, uncertain: 1 },
     },
   };
 }

@@ -21,11 +21,11 @@ See `docs/page-handoff.md` for route ownership and the shared session interface.
 
 ## State and interaction
 
-Use shadcn-vue's source-owned controls in `app/components/ui/` and the existing ReKa-backed Dialog. Attached PDFs are object URLs and are rendered by `PdfSourceViewer.client.vue`, without uploads, OCR, or text extraction. Retain object URLs while navigating between applicants/pages; revoke on root unmount. Display the pending Claude state honestly.
+Use shadcn-vue's source-owned controls in `app/components/ui/` (add more with `npx shadcn-vue@latest add <name>`). Source review is a side panel (`SourceReviewPanel.vue`), not a dialog: it hides the PDF list and shows the continuous viewer beside the checklist. Navigation is node → requirement (scroll + flash in the checklist) → source (panel scrolled to the highlighted line); nodes do not open the PDF directly. Attached PDFs are object URLs and are rendered by `PdfSourceViewer.client.vue`, without automatic uploads, OCR, or text extraction. Explicit Analyze sends one PDF and patient name to the Nuxt Claude endpoint. Retain object URLs while navigating between applicants/pages; revoke on root unmount. Display pending, running, error and completed Claude states honestly.
 
 PDF previews use the bundled PDF.js worker. Use document/page/bbox evidence anchors for highlights, not a text-search guess. Synthetic PDFs are generated from fixtures in `lib/demoPdf.ts` and their authored anchors in `data/demo.ts`. Keep those two coordinated. A null anchor displays a page-only preview. Changing source/page or resizing must keep the overlay aligned and cancel superseded renders.
 
-Review adjustments preserve `original_value` and append session audit notes. Checklist completion and applicability counts derive from visible state. No admission outcome is inferred by the frontend.
+Review adjustments preserve `original_value` and append session audit notes. Checklist completion and applicability counts derive from visible state. The server supplies a coordinator-facing recommendation; coordinator edits invalidate it and affected rule statuses. No final admission action is automated.
 
 ## Verify
 

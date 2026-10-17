@@ -12,7 +12,7 @@ import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import {
   FileText,
-  Plus,
+  Upload,
   Check,
   Minus,
   ChevronDown,
@@ -24,18 +24,18 @@ import {
   ArrowRight,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import type { Fact, Rule, Evidence, PacketDocument } from "../types";
+import type { Fact, Rule, PacketDocument } from "../types";
+import type { ReviewTarget } from "./SourceReviewPanel.vue";
+import { evaluateTree, outcomeLabels, ruleStep, type TreeStep, type StepOutcome } from "#shared/decision-tree";
 
 const {
   referral,
+  analyzing,
+  savingPdf,
+  savePdf,
+  progress,
+  analyze,
+  cancelAnalysis,
   error,
   resetDemo,
   attach,
@@ -49,19 +49,12 @@ const selectedDoc = ref<string | null>(null),
   selectedFact = ref<string | null>(null);
 const group = ref("All factors"),
   graphPage = ref(0),
-  collapsed = ref(new Set<string>());
+  // Context and intake-question steps start folded; everything else is open.
+  collapsed = ref(new Set<string>(["step-4.12", "step-6.3"]));
 const dragging = ref(false),
   uploadInput = ref<HTMLInputElement | null>(null);
-const modal = ref(false),
-  factEdit = ref<Fact | null>(null),
-  ruleEdit = ref<Rule | null>(null);
-const editValue = ref(""),
-  editNote = ref(""),
-  reviewStatus = ref("met"),
-  reviewError = ref(""),
-  evidenceIndex = ref(0);
-const previewDocument = ref<PacketDocument | null>(null),
-  previewOpen = ref(false);
+/** Opened fact/card/source. While set, the PDF list hides and the source review panel takes the right side. */
+const review = ref<ReviewTarget | null>(null);
 const { fitView, zoomIn, zoomOut } = useVueFlow();
 const displayedDocuments = computed(() => referral.value.documents);
 function switchApplicant(event: Event) {
@@ -71,6 +64,7 @@ function switchApplicant(event: Event) {
   useProvidedDocument(doc);
   selectedDoc.value = null;
   selectedFact.value = null;
+  review.value = null;
   group.value = "All factors";
   graphPage.value = 0;
 }
@@ -83,6 +77,8 @@ function showProvided() {
     selectedFact.value = null;
   }
 }
+/** Claude is streaming provisional nodes into the workspace. */
+const live = computed(() => referral.value.status === "analyzing");
 const awaitingClaude = computed(
   () => referral.value.status === "awaiting_claude",
 );
@@ -112,51 +108,58 @@ const factPageCount = computed(() =>
 const visibleFacts = computed(() =>
   filteredFacts.value.slice(graphPage.value * 5, graphPage.value * 5 + 5),
 );
+const visibleSections = computed(() => (referral.value.sections || []).filter(s =>
+  // While Claude is still listing forms (no facts yet), show every form as it arrives.
+  (live.value && !visibleFacts.value.length) ||
+  visibleFacts.value.some(f => f.section_ids?.includes(s.id)) || (s.status === "missing" && group.value === "All factors" && graphPage.value === 0)));
+// Follow the newest streamed facts so new nodes appear in view.
+watch(() => referral.value.facts.length, () => { if (live.value) graphPage.value = factPageCount.value - 1; });
+// When the validated result replaces the live preview, start from the first page again.
+watch(live, (now, before) => { if (before && !now) graphPage.value = 0; });
+function uncertain(status: string) {
+  return ["uncertain", "conflicting", "redacted", "questioned", "concern"].includes(status);
+}
+function edgeStyle(status: string) {
+  return { stroke: ["missing", "not_met"].includes(status) ? "#c34444" : uncertain(status) ? "#b88613" : "#769863",
+    strokeDasharray: uncertain(status) ? "6 5" : "0", strokeWidth: 1.7 };
+}
 const graphNodes = computed<Node[]>(() => {
-  const docIds = new Set(
-    visibleFacts.value.flatMap((f) =>
-      f.evidence_ids.map(
-        (id) => referral.value.evidence.find((e) => e.id === id)?.document_id,
-      ),
-    ),
-  );
-  const docs = referral.value.documents.filter((d) => isPacketMock.value || docIds.has(d.id));
+  const docs = referral.value.documents;
+  const hasSections = visibleSections.value.length > 0;
   return [
-    ...docs.map((d, i) => ({
-      id: d.id,
-      type: "document",
-      position: { x: 20, y: 40 + i * 190 },
-      data: d,
-    })),
-    ...visibleFacts.value.map((f, i) => ({
-      id: f.id,
-      type: "fact",
-      position: { x: 285, y: 20 + i * 123 },
-      data: f,
-    })),
+    ...docs.map((d, i) => ({ id: d.id, type: "document", position: { x: 0, y: 90 + i * 190 }, data: d })),
+    ...visibleSections.value.map((section, i) => ({ id: section.id, type: "section", position: { x: 185, y: 30 + i * 150 }, data: section })),
+    ...visibleFacts.value.map((f, i) => ({ id: f.id, type: "fact", position: { x: hasSections ? 420 : 235, y: 20 + i * 135 }, data: f })),
   ];
 });
-const graphEdges = computed<Edge[]>(() =>
-  visibleFacts.value.flatMap((f) => {
-    const docs = isPacketMock.value ? referral.value.documents.map((d) => d.id) : [
-      ...new Set(
-        f.evidence_ids
-          .map(
-            (id) =>
-              referral.value.evidence.find((e) => e.id === id)?.document_id,
-          )
-          .filter(Boolean),
-      ),
-    ] as string[];
-    return docs.map((d) => ({
-      id: `${d}-${f.id}`,
-      source: d,
-      target: f.id,
-      type: "default",
-      selected: f.id === selectedFact.value,
-    }));
+const graphEdges = computed<Edge[]>(() => [
+  ...visibleSections.value.map(section => ({ id: `${section.document_id}-${section.id}`, source: section.document_id, target: section.id,
+    style: edgeStyle(section.status), selected: visibleFacts.value.find(f => f.id === selectedFact.value)?.section_ids?.includes(section.id) })),
+  ...visibleFacts.value.flatMap(f => {
+    const sources = f.section_ids?.length ? f.section_ids : isPacketMock.value ? referral.value.documents.map(d => d.id) :
+      [...new Set(f.evidence_ids.map(id => referral.value.evidence.find(e => e.id === id)?.document_id).filter(Boolean))] as string[];
+    return sources.map(source => ({ id: `${source}-${f.id}`, source, target: f.id, selected: f.id === selectedFact.value, style: edgeStyle(f.status) }));
   }),
-);
+]);
+/** A form node points to the requirements its facts support; it does not open the PDF. */
+function openSection(section: { id: string }) {
+  selectedFact.value = null;
+  closeReview();
+  revealRules(referral.value.facts.filter((f) => f.section_ids?.includes(section.id)).flatMap((f) => f.rule_ids));
+}
+const repairNote = computed(() => referral.value.audit.find((a) => a.type === "validation_repair")?.note || "");
+const recommendationLabel = computed(() => referral.value.recommendation?.outcome
+  ? `${outcomeLabels[referral.value.recommendation.outcome]}${referral.value.recommendation.stage ? ` · Stage ${referral.value.recommendation.stage}` : ""}` : ({ recommend_approval: "Recommend approval", recommend_denial: "Recommend not approved", needs_information: "More information needed" })[referral.value.recommendation?.status || "needs_information"]);
+/** Analyzed and pending applicants use the staged IHH decision tree; demo/mock keep their own groups. */
+const treeView = computed(() => referral.value.checklist.rules.length > 0 && referral.value.checklist.rules.every((r) => ruleStep.has(r.id)));
+const rulesById = computed(() => new Map(referral.value.checklist.rules.map((r) => [r.id, r])));
+const tree = computed(() => evaluateTree(referral.value.checklist.rules));
+function stepLabel(step: TreeStep, outcome: StepOutcome) {
+  return ({ pass: "Pass", fail: step.failLabel, unresolved: "Needs review", not_reviewed: live.value ? "Waiting for Claude" : "Not reviewed",
+    info: step.gate === "context" ? "Context" : "Information", manual: "Coordinator check" } as Record<StepOutcome, string>)[outcome];
+}
+function rulesOf(step: TreeStep) { return step.rule_ids.map((id) => rulesById.value.get(id)).filter(Boolean) as Rule[]; }
+function ruleActive(r: Rule) { return r.fact_ids.includes(selectedFact.value || "") || (review.value?.kind === "rule" && review.value.id === r.id); }
 const ruleGroups = computed(() => {
   const groups = new Map<string, Rule[]>();
   referral.value.checklist.rules.forEach((r) => {
@@ -165,40 +168,28 @@ const ruleGroups = computed(() => {
   });
   return [...groups].map(([name, items]) => ({ name, items }));
 });
-const linkedEvidence = computed<Evidence[]>(() => {
-  const ids = factEdit.value
-    ? factEdit.value.evidence_ids
-    : (ruleEdit.value?.fact_ids || []).flatMap(
-        (fid) =>
-          referral.value.facts.find((f) => f.id === fid)?.evidence_ids || [],
-      );
-  return [...new Set(ids)]
-    .map((id) => referral.value.evidence.find((e) => e.id === id))
-    .filter(Boolean) as Evidence[];
-});
-const currentEvidence = computed(
-  () => linkedEvidence.value[evidenceIndex.value],
-);
-const currentDocument = computed(() =>
-  referral.value.documents.find(
-    (d) => d.id === currentEvidence.value?.document_id,
-  ),
-);
 function ruleValue(rule: Rule) {
   const f = referral.value.facts.find((f) => rule.fact_ids.includes(f.id));
   return f ? `${f.value}${f.unit ? " " + f.unit : ""}` : "";
 }
 function ruleDetail(rule: Rule) {
   const labels: Record<string, string> = {
+    pending: "Waiting for Claude…",
+    not_reviewed: "Not yet reviewed",
     unknown: isPacketMock.value ? "Not evaluated" : "Not found",
     concern: "Needs clarification",
     not_applicable: "Not applicable",
+    met: "Supported",
+    missing: "Missing evidence",
+    uncertain: "Uncertain · review needed",
+    not_met: "Requirement not met",
   };
-  return ruleValue(rule) || labels[rule.status] || "";
+  return `${labels[rule.status] || rule.status}${ruleValue(rule) ? " · " + ruleValue(rule) : ""}`;
 }
 function upload(files: FileList | File[] | null) {
   if (!files?.length) return;
   attach(files);
+  review.value = null;
   selectedDoc.value = null;
   selectedFact.value = null;
   if (uploadInput.value) uploadInput.value.value = "";
@@ -209,59 +200,64 @@ function onDrop(e: DragEvent) {
 }
 function demo() {
   resetDemo();
+  review.value = null;
   selectedDoc.value = null;
   selectedFact.value = null;
   graphPage.value = 0;
   group.value = "All factors";
 }
-function openDocument(doc: PacketDocument) {
-  if (doc.status === "provided_demo") {
-    if (referral.value.id !== doc.id) useProvidedDocument(doc);
-    selectedFact.value = null;
+function openReview(target: ReviewTarget) {
+  review.value = target;
+  if (target.kind === "fact") selectedFact.value = target.id;
+  if (target.kind === "rule") {
+    const rule = referral.value.checklist.rules.find((r) => r.id === target.id);
+    if (rule?.fact_ids[0] && !rule.fact_ids.includes(target.factId || "")) selectedFact.value = rule.fact_ids[0];
   }
-  selectedDoc.value = doc.id;
-  previewDocument.value = doc;
-  previewOpen.value = true;
-}
-function selectFact(f: Fact) {
-  selectedFact.value = f.id;
   nextTick(drawOutputs);
 }
-function inspectFact(f: Fact) {
-  factEdit.value = f;
-  ruleEdit.value = null;
-  editValue.value = f.value;
-  editNote.value = f.review_note;
-  evidenceIndex.value = 0;
-  reviewError.value = "";
-  modal.value = true;
+function closeReview() {
+  review.value = null;
+  nextTick(drawOutputs);
 }
-function inspectRule(r: Rule) {
-  ruleEdit.value = r;
-  factEdit.value = null;
-  editNote.value = r.note;
-  reviewStatus.value = ["met", "concern", "not_applicable"].includes(r.status)
-    ? r.status
-    : "unknown";
-  evidenceIndex.value = 0;
-  reviewError.value = "";
-  modal.value = true;
-  if (r.fact_ids[0]) selectedFact.value = r.fact_ids[0];
+function openDocument(doc: PacketDocument) {
+  selectedDoc.value = doc.id;
+  openReview({ kind: "document", id: doc.id });
 }
-function saveReview(status = "confirmed") {
-  if (editNote.value.trim().length < 3) {
-    reviewError.value = "Add a short note explaining the adjustment.";
+/** Rules flashed after a node click; also used for the "not linked" notice. */
+const flashedRules = ref(new Set<string>()), linkNotice = ref("");
+let flashTimer: ReturnType<typeof setTimeout> | undefined;
+/** Scroll Application review to the first of these requirements (expanding its group) and flash them. */
+function revealRules(ids: string[]) {
+  const wanted = new Set(ids);
+  clearTimeout(flashTimer);
+  if (!wanted.size) {
+    flashedRules.value = new Set();
+    linkNotice.value = "This item is not linked to a requirement yet.";
+    flashTimer = setTimeout(() => (linkNotice.value = ""), 2500);
     return;
   }
-  if (factEdit.value) {
-    if (!editValue.value.trim()) {
-      reviewError.value = "Enter a value.";
-      return;
-    }
-    updateFact(factEdit.value, editValue.value.trim(), editNote.value, status);
-  } else if (ruleEdit.value)
-    updateRule(ruleEdit.value, reviewStatus.value, editNote.value);
-  modal.value = false;
+  linkNotice.value = "";
+  const groups = new Set(referral.value.checklist.rules.filter((r) => wanted.has(r.id)).flatMap((r) => {
+    const place = ruleStep.get(r.id);
+    return place ? [place.stage.id, `step-${place.step.id}`] : [r.section];
+  }));
+  collapsed.value = new Set([...collapsed.value].filter((g) => !groups.has(g)));
+  flashedRules.value = wanted;
+  nextTick(() => {
+    const first = [...document.querySelectorAll<HTMLElement>(".checklist .rule-row")].find((el) => wanted.has(el.id.slice(5)));
+    first?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setTimeout(drawOutputs, 450);
+  });
+  flashTimer = setTimeout(() => (flashedRules.value = new Set()), 1800);
+}
+/** A fact node selects the fact and jumps to its requirements; the PDF opens from a requirement. */
+function selectFact(f: Fact) {
+  selectedFact.value = f.id;
+  closeReview();
+  revealRules(f.rule_ids);
+}
+function inspectRule(r: Rule) {
+  openReview({ kind: "rule", id: r.id, factId: r.fact_ids.includes(selectedFact.value || "") ? selectedFact.value! : undefined });
 }
 function toggleGroup(name: string) {
   const set = new Set(collapsed.value);
@@ -269,7 +265,7 @@ function toggleGroup(name: string) {
   collapsed.value = set;
   nextTick(drawOutputs);
 }
-const outputWires = ref<{ id: string; d: string }[]>([]),
+const outputWires = ref<{ id: string; d: string; style: ReturnType<typeof edgeStyle> }[]>([]),
   workspaceElement = ref<HTMLElement | null>(null);
 function drawOutputs() {
   if (!import.meta.client || !workspaceElement.value || !selectedFact.value) {
@@ -307,6 +303,7 @@ function drawOutputs() {
     return [
       {
         id,
+        style: edgeStyle(referral.value.checklist.rules.find(r => r.id === id)?.status || "uncertain"),
         d: `M${x},${y} C${x + (xx - x) / 2},${y} ${xx - 40},${yy} ${xx},${yy}`,
       },
     ];
@@ -323,16 +320,20 @@ watch(
       setTimeout(drawOutputs, 180);
     }),
 );
+watch(() => referral.value.id, () => { selectedFact.value = null; selectedDoc.value = null; review.value = null; group.value = "All factors"; graphPage.value = 0; });
+// Reopening/closing the review resizes the graph column; refit once the grid transition settles.
+watch(() => review.value === null, () => setTimeout(() => { fitView({ padding: 0.22, maxZoom: 1, duration: 150 }); drawOutputs(); }, 220));
+watch(() => referral.value.checklist.rules.map(r => r.status).join(","), () => nextTick(drawOutputs));
 onMounted(() => window.addEventListener("resize", drawOutputs));
 onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
 </script>
 
 <template>
-  <main ref="workspaceElement" class="workspace">
+  <main ref="workspaceElement" class="workspace" :class="{ reviewing: review }">
     <svg v-if="outputWires.length" class="output-wires" aria-hidden="true">
-      <path v-for="wire in outputWires" :key="wire.id" :d="wire.d" />
+      <path v-for="wire in outputWires" :key="wire.id" :d="wire.d" :style="wire.style" />
     </svg>
-    <section class="panel documents" aria-labelledby="documents-title">
+    <section v-show="!review" class="panel documents" aria-labelledby="documents-title">
       <header class="panel-head">
         <div class="eyebrow"><span class="step">01</span> Sources</div>
         <div class="head-row">
@@ -343,9 +344,29 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
         </div>
       </header>
       <div class="scroll-body">
-        <div v-if="mode === 'provided'" class="review-field" style="padding: 16px 20px 0">
-          <label for="applicant">Applicant</label>
-          <select id="applicant" class="evidence-select" :value="referral.id" @change="switchApplicant">
+        <label
+          class="upload-area upload-primary"
+          :class="{ dragging, disabled: analyzing }"
+          @dragover.prevent="dragging = true"
+          @dragleave="dragging = false"
+          @drop.prevent="onDrop"
+          ><input
+            ref="uploadInput"
+            type="file"
+            accept="application/pdf,.pdf"
+            class="sr-only"
+            :disabled="analyzing"
+            @change="upload(($event.target as HTMLInputElement).files)"
+          /><Upload :size="20" /><strong>{{ referral.documents.length && mode === 'attached' ? 'Upload another applicant PDF' : 'Upload applicant PDF' }}</strong>
+          <span class="tiny muted">Drop or choose one combined PDF (≤ 50 MB). Inline Claude analysis supports PDFs up to 20 MB.</span></label
+        >
+        <div v-if="analyzing" class="analysis-controls" role="status" aria-live="polite">
+          <p class="tiny analysis-progress"><span class="status-dot busy" />{{ progress?.message || "Starting analysis…" }}</p>
+          <button class="tiny stop-link" @click="cancelAnalysis">Stop analysis</button>
+        </div>
+        <div v-if="mode === 'provided'" class="review-field" style="padding: 12px 20px 0">
+          <label for="applicant">Or review a provided packet</label>
+          <select id="applicant" class="evidence-select" :value="referral.id" :disabled="analyzing" @change="switchApplicant">
             <option v-for="doc in providedDocuments" :key="doc.id" :value="doc.id">{{ doc.name.replace('.pdf', '') }} · separate applicant</option>
           </select>
         </div>
@@ -363,51 +384,35 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
                 <span class="file-name">{{ doc.name }}</span>
                 <div class="file-meta">
                   {{
-                    doc.page_count
-                      ? `${doc.page_count} pages · ${doc.status === "provided_demo" ? "provided example" : "example"}`
-                      : "Attached · awaiting Claude"
+                    live ? "Claude is reading…" : doc.page_count
+                      ? `${doc.page_count} pages · ${doc.status === "analyzed" ? "Claude reviewed" : doc.status === "provided_demo" ? "provided packet" : "example"}`
+                      : "Uploaded · not analyzed"
                   }}
                 </div>
               </div>
             </button>
           </div>
         </div>
-        <label
-          class="upload-area"
-          :class="{ dragging }"
-          @dragover.prevent="dragging = true"
-          @dragleave="dragging = false"
-          @drop.prevent="onDrop"
-          ><input
-            ref="uploadInput"
-            type="file"
-            accept="application/pdf,.pdf"
-            class="sr-only"
-            @change="upload(($event.target as HTMLInputElement).files)"
-          /><Plus :size="18" /><span>Replace applicant PDF</span></label
-        >
-        <div v-if="mode === 'provided'" class="local-label">
-          One applicant · one combined PDF.<br />
-          {{ isPacketMock ? 'R01 mock review · based on your packet summary, not extracted findings.' : 'R02 preview · analysis awaits Claude.' }}
+        <div v-if="mode !== 'synthetic' && referral.documents.length && !analyzing" class="source-actions">
+          <!-- Provided packets never auto-analyze; uploads do. Retry is always explicit. -->
+          <Button v-if="mode === 'provided' || error || referral.status === 'analyzed'" size="sm" :variant="referral.status === 'analyzed' ? 'outline' : 'default'" :disabled="savingPdf" @click="analyze">
+            {{ referral.status === 'analyzed' ? 'Analyze again' : error ? 'Retry analysis' : 'Analyze with Claude' }}
+          </Button>
+          <Button size="sm" variant="ghost" :disabled="savingPdf || !!referral.documents[0]?.storage" @click="savePdf">{{ savingPdf ? 'Saving PDF…' : referral.documents[0]?.storage ? 'PDF saved privately' : 'Save PDF to private storage' }}</Button>
         </div>
-        <div v-else-if="referral.status === 'awaiting_pdf'" class="local-label">
-          Add this applicant’s combined referral PDF to begin.
-        </div>
-        <div v-else-if="awaitingClaude" class="local-label">
-          Files are attached in this browser session.<br />Claude analysis will
-          be connected later.
-        </div>
+        <div v-if="isPacketMock" class="local-label">R01 mock review · based on your packet summary, not extracted findings.</div>
         <div v-if="error" class="error-box" role="alert">{{ error }}</div>
       </div>
       <footer class="panel-foot">
         <span>{{
           referral.status === "awaiting_pdf"
             ? "Needs PDF"
+            : live ? "Analyzing with Claude"
             : mode === "provided"
             ? "Provided PDFs"
             : awaitingClaude
-              ? "Awaiting integration"
-              : "Synthetic flow"
+              ? "Ready for analysis"
+              : referral.status === "analyzed" ? "Claude analysis" : mode === "synthetic" ? "Synthetic flow" : "Attached PDF"
         }}</span>
         <button v-if="mode !== 'synthetic'" @click="demo">
           Synthetic flow
@@ -427,7 +432,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
           <h2 id="processor-title">Processor</h2>
           <span class="progress-caption"
             ><span class="status-dot" />{{
-              referral.status === "awaiting_pdf" ? "Needs PDF" : isPacketMock ? "Mock review" : awaitingClaude ? "Awaiting Claude" : "Preview"
+              analyzing ? `Analyzing · ${referral.facts.length} facts` : referral.status === "awaiting_pdf" ? "Needs PDF" : isPacketMock ? "Mock review" : awaitingClaude ? "Ready" : referral.status === "analyzed" ? "Review required" : "Preview"
             }}</span
           >
         </div>
@@ -465,6 +470,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
           ><Maximize :size="14"
         /></Button>
       </div>
+      <div class="graph-legend"><span>PDF → forms → facts → application</span><span v-if="live" class="live-key">● Live · provisional nodes</span><span class="missing-key">Red: missing</span><span class="uncertain-key">┄ Yellow: uncertain</span></div>
       <div class="graph-wrap">
         <ClientOnly
           ><VueFlow
@@ -482,7 +488,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
           >
             <Background :gap="18" :size="0.6" pattern-color="#cbd7c0" />
             <template #node-document="{ data }"
-              ><div class="graph-node doc">
+              ><div class="graph-node doc" :class="{ live }">
                 <Handle type="source" :position="Position.Right" />
                 <div class="node-label">SOURCE PDF</div>
                 <div class="node-value">
@@ -492,21 +498,30 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
                   />{{ data.name }}
                 </div>
                 <div class="node-meta">
-                  {{ data.page_count }} pages · example
+                  {{ data.page_count || "—" }} pages · {{ data.status === "analyzed" ? "Claude" : live ? "Claude reading…" : "source" }}
                 </div>
               </div></template
             >
+            <template #node-section="{ data }">
+              <button class="graph-node form-node" :class="{ live, missing: data.status === 'missing', questioned: data.status === 'uncertain' }" @click="openSection(data)">
+                <Handle type="target" :position="Position.Left" /><Handle type="source" :position="Position.Right" />
+                <div class="node-label">FORM / SECTION</div>
+                <div class="node-value">{{ data.title }}</div>
+                <div class="node-meta">{{ data.pages.length ? `Pages ${data.pages.join(', ')}` : 'Not found in PDF' }}</div>
+                <div class="node-meta">{{ data.status }}</div>
+              </button>
+            </template>
             <template #node-fact="{ data }"
               ><button
                 :id="`fact-${data.id}`"
                 class="graph-node"
                 :class="{
+                  live,
                   selected: selectedFact === data.id,
-                  questioned: data.status === 'questioned',
+                  questioned: uncertain(data.status),
+                  missing: data.status === 'missing',
                 }"
                 @click="selectFact(data)"
-                @dblclick="inspectFact(data)"
-                @keydown.enter.prevent="inspectFact(data)"
               >
                 <Handle type="target" :position="Position.Left" /><Handle
                   type="source"
@@ -514,17 +529,12 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
                 />
                 <div class="node-label">{{ data.label }}</div>
                 <div class="node-value">
-                  {{ data.value }} <span v-if="data.unit">{{ data.unit }}</span>
+                  {{ data.value || (data.status === "redacted" ? "Redacted" : "Missing") }} <span v-if="data.unit">{{ data.unit }}</span>
                 </div>
                 <div class="node-meta">
                   {{ isPacketMock ? "Mock · supplied packet summary" : `${data.evidence_ids.length} source${data.evidence_ids.length === 1 ? '' : 's'}` }}
                 </div>
-                <span
-                  v-if="selectedFact === data.id"
-                  class="node-review"
-                  @click.stop="inspectFact(data)"
-                  >Review / adjust →</span
-                >
+                <span v-if="selectedFact === data.id" class="node-review">{{ data.rule_ids.length ? `${data.rule_ids.length} linked requirement${data.rule_ids.length === 1 ? "" : "s"} →` : "No linked requirement" }}</span>
               </button></template
             >
           </VueFlow></ClientOnly
@@ -538,18 +548,18 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             /></span>
           </div>
           <p>
-            PDF → patient information → checklist<br /><br />{{
+            PDF → forms → patient facts → application<br /><br />{{
               referral.status === "awaiting_pdf"
                 ? "Attach one combined PDF to begin this applicant’s review."
                 : awaitingClaude
-                  ? "Your file is ready for the future Claude integration."
+                  ? "Enter a patient name and choose Analyze with Claude."
                   : "No nodes in this selection."
             }}
           </p>
         </div>
       </div>
       <footer class="panel-foot">
-        <span>Click to trace · double-click to adjust</span>
+        <span>Node → its requirement · requirement → source PDF</span>
         <div class="button-row">
           <Button
             variant="ghost"
@@ -578,21 +588,65 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
       <header class="panel-head">
         <div class="eyebrow"><span class="step">03</span> Result</div>
         <div class="head-row">
-          <h2 id="checklist-title">Checklist</h2>
+          <h2 id="checklist-title">Application review</h2>
           <span class="muted tiny mono"
             >{{ confirmedRules }} / {{ applicableRules }}</span
           >
         </div>
       </header>
+      <div v-if="linkNotice" class="link-notice" role="status">{{ linkNotice }}</div>
       <div class="scroll-body" @scroll="drawOutputs">
+        <div v-if="referral.recommendation" class="recommendation" :class="referral.recommendation.status" role="status">
+          <strong>{{ recommendationLabel }}</strong>
+          <p>Claude recommendation · coordinator confirms the final decision.</p>
+          <details><summary>Decision path · {{ referral.recommendation.rule_ids.length }} linked criteria</summary>
+            <p v-for="(reason, i) in referral.recommendation.reasons" :key="i">{{ reason }}</p>
+          </details>
+        </div>
+        <details v-if="repairNote" class="criteria-note"><summary>Validation repairs applied</summary><p>{{ repairNote }}</p></details>
+        <details v-if="referral.checklist.source_url" class="criteria-note"><summary>Criteria & precedence</summary><p>{{ referral.checklist.precedence }}</p><a :href="referral.checklist.source_url" target="_blank" rel="noreferrer">Source criteria ↗</a></details>
         <div v-if="isPacketMock" class="intro-label">
           Mock checklist · document presence only. Clinical eligibility is not assessed.
           Historical IHH outcome: deny; reason not recorded. This label does not drive the checklist.
         </div>
-        <div v-if="awaitingClaude" class="intro-label">
-          Checklist results will appear after Claude analysis is connected.
+        <div v-if="live" class="intro-label live-label" role="status">
+          <span class="status-dot busy" />{{ referral.checklist.rules.length
+            ? `Claude is reviewing criteria · ${referral.checklist.rules.filter(r => r.status !== 'pending').length} / ${referral.checklist.rules.length}`
+            : "Requirements are reviewed after Claude finishes reading forms and facts." }}
+          Provisional until the full result passes validation.
         </div>
-        <div v-for="g in ruleGroups" :key="g.name" class="group">
+        <template v-if="treeView">
+          <div v-if="!referral.recommendation" class="recommendation tree-outcome" :class="tree.outcome" role="status">
+            <strong>{{ live ? `Provisional · ${outcomeLabels[tree.outcome]}` : outcomeLabels[tree.outcome] }}{{ tree.stage ? ` · Stage ${tree.stage.number}` : "" }}</strong>
+            <p>{{ tree.outcome === "not_reviewed" ? "Every IHH criterion is listed below. Analyze the PDF to evaluate each stage and link evidence." : "Staged IHH decision tree · coordinator confirms the final decision." }}</p>
+          </div>
+          <div v-for="s in tree.stages" :key="s.stage.id" class="group stage">
+            <button class="group-header" :aria-expanded="!collapsed.has(s.stage.id)" @click="toggleGroup(s.stage.id)">
+              <ChevronRight v-if="collapsed.has(s.stage.id)" :size="12" class="muted" /><ChevronDown v-else :size="12" class="muted" />
+              <span class="stage-number mono">{{ s.stage.number }}</span>
+              <span class="group-title">{{ s.stage.title }}</span>
+              <span class="stage-badge" :class="s.outcome">{{ s.outcome === "not_reviewed" && live ? "Waiting for Claude" : outcomeLabels[s.outcome] }}</span>
+            </button>
+            <div v-if="!collapsed.has(s.stage.id)" class="stage-body">
+              <p class="stage-summary">{{ s.stage.summary }}</p>
+              <div v-for="st in s.steps" :key="st.step.id" class="tree-step" :class="st.outcome">
+                <button class="step-header" :aria-expanded="!collapsed.has(`step-${st.step.id}`)" @click="toggleGroup(`step-${st.step.id}`)">
+                  <span class="mono step-id">{{ st.step.id }}</span>
+                  <span class="step-title">{{ st.step.title }}</span>
+                  <span class="step-badge" :class="st.outcome">{{ stepLabel(st.step, st.outcome) }}</span>
+                </button>
+                <p class="step-question">{{ st.step.question }}<template v-if="st.step.failLabel"> If not → {{ st.step.failLabel }}.</template></p>
+                <p v-if="st.step.gate === 'manual'" class="step-manual">Not in the pinned criteria · the coordinator verifies this check.</p>
+                <template v-else-if="!collapsed.has(`step-${st.step.id}`)">
+                  <RuleRow v-for="r in rulesOf(st.step)" :key="r.id" :rule="r" :detail="ruleDetail(r)" :show-note="referral.status === 'analyzed'"
+                    :active="ruleActive(r)" :flash="flashedRules.has(r.id)" @inspect="inspectRule" />
+                </template>
+                <button v-else class="step-more" @click="toggleGroup(`step-${st.step.id}`)">Show {{ st.step.rule_ids.length }} criteria</button>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div v-for="g in ruleGroups" v-else :key="g.name" class="group">
           <button
             class="group-header"
             :aria-expanded="!collapsed.has(g.name)"
@@ -620,152 +674,16 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             />
           </div>
           <div v-if="!collapsed.has(g.name)">
-            <button
-              v-for="r in g.items"
-              :id="`rule-${r.id}`"
-              :key="r.id"
-              class="rule-row"
-              :class="{ active: r.fact_ids.includes(selectedFact || '') }"
-              @click="inspectRule(r)"
-            >
-              <div style="min-width: 0">
-                <span class="rule-text">{{ r.text }}</span>
-                <div class="rule-state" :class="r.status">
-                  {{ ruleDetail(r) }}
-                </div>
-              </div>
-              <Check
-                v-if="r.status === 'met'"
-                :size="13"
-                class="rule-symbol"
-              /><AlertCircle
-                v-else-if="r.status === 'concern'"
-                :size="13"
-                class="rule-symbol"
-              /><Minus v-else :size="12" class="rule-symbol" />
-            </button>
+            <RuleRow v-for="r in g.items" :key="r.id" :rule="r" :detail="ruleDetail(r)" :show-note="referral.status === 'analyzed'"
+              :active="ruleActive(r)" :flash="flashedRules.has(r.id)" @inspect="inspectRule" />
           </div>
         </div>
       </div>
       <footer class="panel-foot">
-        <span>Linked to sources</span><span>Example checklist</span>
+        <span>{{ treeView ? "IHH decision tree · 6 stages" : "Linked to sources" }}</span><span>{{ referral.status === "analyzed" ? "Coordinator review" : treeView ? `${referral.checklist.rules.length} criteria` : "Example checklist" }}</span>
       </footer>
     </section>
-    <Dialog v-model:open="modal"
-      ><DialogContent class="inspector"
-        ><DialogHeader
-          ><DialogTitle>{{ factEdit?.label || ruleEdit?.text }}</DialogTitle
-          ><DialogDescription
-            >Inspect and adjust this {{ isPacketMock ? "mock packet review" : "synthetic example" }}. Changes last for this browser session.</DialogDescription
-          ></DialogHeader
-        >
-        <div class="inspector-grid">
-          <div>
-            <div v-if="currentEvidence" class="page-nav">
-              <span class="tiny muted"
-                >{{ currentDocument?.name }} · page
-                {{ currentEvidence.page }}</span
-              >
-              <div class="button-row">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  :disabled="evidenceIndex === 0"
-                  @click="evidenceIndex--"
-                  >←</Button
-                ><span class="tiny"
-                  >{{ evidenceIndex + 1 }} / {{ linkedEvidence.length }}</span
-                ><Button
-                  variant="outline"
-                  size="sm"
-                  :disabled="evidenceIndex + 1 >= linkedEvidence.length"
-                  @click="evidenceIndex++"
-                  >→</Button
-                >
-              </div>
-            </div>
-            <ClientOnly>
-              <PdfSourceViewer
-                v-if="(currentDocument || (isPacketMock ? referral.documents[0] : undefined))?.local_url"
-                :url="(currentDocument || referral.documents[0])!.local_url!"
-                :title="(currentDocument || referral.documents[0])!.name"
-                :page="currentEvidence?.page || 1"
-                :bbox="currentEvidence?.bbox || null"
-              />
-            </ClientOnly>
-            <div v-if="currentEvidence" class="evidence-quote">
-              {{ currentEvidence.quote }}
-            </div>
-            <div v-else class="empty-evidence">
-              {{ isPacketMock ? "No verified page or highlight for this item. Review the original packet; the summary supplies document presence only." : "No supporting information in this example." }}
-            </div>
-            <p class="audit-note">
-              {{ isPacketMock ? "Mock review from the supplied packet summary. No patient values or source coordinates were extracted. No highlight is claimed." : "Synthetic PDF and authored source highlight. Future Claude results can use the same document, page, and section-anchor contract." }}
-            </p>
-          </div>
-          <div>
-            <div v-if="factEdit" class="review-field">
-              <label for="fact-value">Value</label
-              ><Textarea id="fact-value" v-model="editValue" />
-              <p
-                v-if="factEdit.value !== factEdit.original_value"
-                class="correction"
-              >
-                Original: {{ factEdit.original_value }}
-              </p>
-            </div>
-            <div v-if="ruleEdit" class="review-field">
-              <label for="rule-status">Checklist status</label
-              ><select
-                id="rule-status"
-                v-model="reviewStatus"
-                class="evidence-select"
-              >
-                <option value="met">Completed</option>
-                <option value="concern">Needs clarification</option>
-                <option value="not_applicable">Not applicable</option>
-                <option value="unknown">Unknown</option>
-              </select>
-            </div>
-            <div class="review-field">
-              <label for="review-note">Adjustment note</label
-              ><Textarea
-                id="review-note"
-                v-model="editNote"
-                placeholder="Why is this adjustment needed?"
-              />
-            </div>
-            <p v-if="reviewError" class="error-box" role="alert">
-              {{ reviewError }}
-            </p>
-            <div class="dialog-actions">
-              <Button @click="saveReview()">Save adjustment</Button
-              ><Button
-                v-if="factEdit"
-                variant="outline"
-                @click="saveReview('questioned')"
-                >Flag for clarification</Button
-              >
-            </div>
-          </div>
-        </div></DialogContent
-      ></Dialog
-    >
-    <Dialog v-model:open="previewOpen"
-      ><DialogContent class="inspector"
-        ><DialogHeader
-          ><DialogTitle>{{ previewDocument?.name }}</DialogTitle
-          ><DialogDescription>{{
-            previewDocument?.status === "demo"
-              ? "Synthetic example PDF."
-              : "Provided PDF · browser preview only. This file has not been analyzed or sent to a model."
-          }}</DialogDescription></DialogHeader
-        ><ClientOnly
-          ><PdfSourceViewer
-            v-if="previewDocument?.local_url"
-            :url="previewDocument.local_url"
-            :title="previewDocument.name" /></ClientOnly></DialogContent
-    ></Dialog>
+    <SourceReviewPanel v-if="review" :target="review" @close="closeReview" @select="openReview" />
   </main>
 </template>
 <style scoped>

@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ocimpactlabrefferalintake",
+  "account_id": "bb6d78df57f6062338cc78cd9d01500a",
+  "main": ".output/server/index.mjs",
+  "compatibility_date": "2026-10-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".output/public"
+  },
+  "r2_buckets": [
+    { "binding": "REFERRAL_PDFS", "bucket_name": "referralready" }
+  ],
+  "vars": {
+    "NUXT_WORKSPACE_ORIGIN": "https://ocimpactlabrefferalintake.notnaren.workers.dev",
+    "NUXT_CLOUDFLARE_ACCESS_TEAM_DOMAIN": "dawnff.cloudflareaccess.com",
+    "NUXT_CLOUDFLARE_ACCESS_AUDIENCE": "c2041466dfcf1809cc651d534837dc5eeeacafe8d15d8abf1b7801e1e855aeb9",
+    "NUXT_WORKSPACE_ALLOWED_EMAILS": "vivianchih19@gmail.com"
+  },
+  // Remote API requests also require a valid Cloudflare Access assertion.
+  "workers_dev": true,
+  "preview_urls": false
+  // Set NUXT_ANTHROPIC_API_KEY with `wrangler secret put`, never in vars.
+}
