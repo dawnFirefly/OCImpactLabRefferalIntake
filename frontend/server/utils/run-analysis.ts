@@ -7,7 +7,12 @@ import { callClaude, uploadPdf, deletePdf, AnalysisFailure } from "./claude";
 import { extractionPrompt, evaluationPrompt } from "./prompts";
 import { anthropicKey } from "./credentials";
 
-let busy = false;
+/**
+ * One analysis at a time per server instance. On Cloudflare Workers a killed invocation (e.g. Error 1102)
+ * never runs `finally`, so the lock also expires on its own instead of blocking every later upload.
+ */
+const lockMs = 4 * 60 * 1000;
+let busyUntil = 0;
 
 /** A data-free validation reason: our own rule names or schema paths, never document values. */
 function validationReason(error: unknown) {
@@ -25,8 +30,9 @@ export function streamAnalysis(event: H3Event, input: { pdf: Uint8Array; fileNam
   const config = useRuntimeConfig(event);
   const apiKey = anthropicKey(config, event.context.cloudflare?.env);
   if (!apiKey) throw createError({ statusCode: 503, statusMessage: "Claude is not configured. Set the server-only NUXT_ANTHROPIC_API_KEY secret." });
-  if (busy) throw createError({ statusCode: 429, statusMessage: "Another analysis is running. Please wait and try again." });
-  busy = true;
+  if (Date.now() < busyUntil) throw createError({ statusCode: 429, statusMessage: "Another analysis is running. Please wait and try again." });
+  busyUntil = Date.now() + lockMs;
+  const release = () => { busyUntil = 0; };
   // Stop paying for Claude work when the coordinator cancels or closes the tab.
   const abort = new AbortController();
   event.node.res.on("close", () => { if (!event.node.res.writableFinished) abort.abort(); });
@@ -89,11 +95,12 @@ export function streamAnalysis(event: H3Event, input: { pdf: Uint8Array; fileNam
         send({ type: "error", message: error instanceof AnalysisFailure ? error.message
           : `The analysis did not pass evidence validation (${validationReason(error)}). No result was applied. Please retry or review the PDF manually.` });
       } finally {
-        busy = false;
+        release();
         if (uploadedFileId) await deletePdf(apiKey, uploadedFileId);
         try { controller.close(); } catch { /* client already disconnected */ }
       }
     },
-    cancel() { abort.abort(); },
+    // The browser left (navigation, Stop, closed tab): stop Claude work and free the lock.
+    cancel() { abort.abort(); release(); },
   });
 }
