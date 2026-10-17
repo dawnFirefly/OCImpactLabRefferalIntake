@@ -25,7 +25,7 @@ Shared files (`app.vue`, `layouts/default.vue`, `composables/useReviewWorkspace.
 
 The shared navigation links `/`, `/processor`, and `/summary`. Direct links initialize a demo workspace. Route navigation preserves the active applicant. Refresh resets all session changes. The processor uses an explicit **Continue to summary** link. A future analysis agent can navigate to `/summary` after a real completion event; no fake completion timer exists now.
 
-The summary contains headings only. It does not display pass/fail explanations, invented clinical conclusions, or model-generated recommendations. Dashboard creation requires a name/reference and one PDF.
+The summary contains headings only. It does not display pass/fail explanations, invented clinical conclusions, or model-generated recommendations. Dashboard creation requires a name/reference and one PDF. Successful creation selects that stored applicant, navigates to `/processor`, and starts Claude analysis once. Editing details or reopening an existing applicant does not start another analysis. Intake details and the applicant reference survive streamed and completed analysis; failures leave the saved applicant available for retry.
 
 ## Verification
 

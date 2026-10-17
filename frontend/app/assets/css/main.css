@@ -88,9 +88,18 @@ a {
   min-height: 0;
 }
 .panel-head {
-  padding: 23px 20px 20px;
+  padding: 6px 20px 5px;
   border-bottom: 1px solid #e8ece3;
   flex-shrink: 0;
+}
+.panel-head .eyebrow {
+  line-height: 12px;
+}
+.panel-head h1,
+.panel-head h2 {
+  margin-top: 2px;
+  font-size: 16px;
+  line-height: 20px;
 }
 .eyebrow {
   font-size: 10px;
@@ -627,7 +636,7 @@ h2 {
     gap: 12px;
   }
   .panel-head {
-    padding: 20px 15px;
+    padding: 6px 15px 5px;
   }
   .files {
     padding: 13px 8px;
@@ -699,13 +708,13 @@ h2 {
 .add-applicant input { border: 1px solid var(--border); padding: 10px; border-radius: 6px; flex: 1; min-width: 180px; }
 .skeleton-note { margin-top: 24px; font-size: 12px; }
 .page-actions { display: flex; gap: 12px; margin-top: 28px; }
-.processor-next { display: flex; justify-content: flex-end; align-items: center; gap: 20px; padding: 0 24px 16px; color: #788574; }
+.summary-ready { margin-left: auto; display: flex; align-items: center; gap: 12px; color: #788574; font-size: 12px; }
 @media (max-width: 850px) {
   .app-nav { flex-wrap: wrap; gap: 12px 24px; }
   .active-applicant { display: none; }
   .app-shell .workspace { height: auto; min-height: 0; }
   .applicant-card, .page-heading { align-items: flex-start; flex-wrap: wrap; }
-  .processor-next { flex-wrap: wrap; }
+  .summary-ready { flex-wrap: wrap; justify-content: flex-end; }
 }
 
 .analysis-controls { display: grid; gap: 10px; padding: 18px; border-bottom: 1px solid var(--border); }

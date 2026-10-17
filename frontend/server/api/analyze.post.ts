@@ -15,8 +15,6 @@ function validationReason(error: unknown) {
   return error instanceof Error && /^[A-Za-z ]{3,60}$/.test(error.message) ? error.message : "unknown";
 }
 const maxBytes = maxPacketBytes;
-/** Raw size sent inline (base64 stays under the 32 MB request limit); larger PDFs use the Files API. */
-const inlinePdfBytes = 20 * 1024 * 1024;
 
 /**
  * Streams newline-delimited JSON: progress, provisional `section`/`fact`/`criteria`/`rule`
@@ -32,14 +30,17 @@ export default defineEventHandler(async event => {
   const apiKey = anthropicKey(config, event.context.cloudflare?.env);
   if (!apiKey) throw createError({ statusCode: 503, statusMessage: "Claude is not configured. Set the server-only NUXT_ANTHROPIC_API_KEY secret." });
   if (busy) throw createError({ statusCode: 429, statusMessage: "Another analysis is running. Please wait and try again." });
-  const parts = await readMultipartFormData(event);
-  const files = parts?.filter(p => p.filename !== undefined) || [];
-  const nameParts = parts?.filter(p => p.name === "patientName" && p.filename === undefined) || [];
-  const file = files[0];
-  const patientName = nameParts[0]?.data.toString("utf8").trim() || "";
+  // The browser sends the raw PDF bytes (no multipart parsing: cheaper on the Worker's CPU budget).
+  if (!getHeader(event, "content-type")?.startsWith("application/pdf")) throw createError({ statusCode: 415, statusMessage: "Send one PDF file." });
+  const decode = (value: string | undefined) => { try { return decodeURIComponent(value || "").trim(); } catch { return ""; } };
+  const fileName = decode(getHeader(event, "x-file-name")).replace(/[\u0000-\u001f]/g, "").slice(0, 200) || "applicant.pdf";
   // Optional: without a name, Claude reads the patient's name from the PDF and identity is not cross-checked.
-  if (nameParts.length > 1 || patientName.length > 200) throw createError({ statusCode: 400, statusMessage: "The patient's name must be up to 200 characters." });
-  if (files.length !== 1 || !file || file.name !== "pdf" || !file.filename?.toLowerCase().endsWith(".pdf") || !file.data.length || file.data.length > maxBytes || !file.data.subarray(0, 1024).includes(Buffer.from("%PDF-"))) {
+  const patientName = decode(getHeader(event, "x-patient-name"));
+  if (patientName.length > 200) throw createError({ statusCode: 400, statusMessage: "The patient's name must be up to 200 characters." });
+  const body = await readRawBody(event, false);
+  const data = body ? new Uint8Array(body) : new Uint8Array();
+  const signature = new TextDecoder().decode(data.subarray(0, 1024));
+  if (!fileName.toLowerCase().endsWith(".pdf") || !data.length || data.length > maxBytes || !signature.includes("%PDF-")) {
     throw createError({ statusCode: 400, statusMessage: "Choose exactly one valid combined PDF up to 50 MB." });
   }
   busy = true;
@@ -53,14 +54,11 @@ export default defineEventHandler(async event => {
       const send = (payload: unknown) => controller.enqueue(new TextEncoder().encode(`${JSON.stringify(payload)}\n`));
       let uploadedFileId: string | null = null;
       try {
-        // Inline base64 grows ~4/3 and the Messages request is capped at 32 MB: larger PDFs go via the Files API.
-        let pdfSource: { type: "base64"; media_type: "application/pdf"; data: string } | { type: "file"; file_id: string };
-        if (file.data.length <= inlinePdfBytes) pdfSource = { type: "base64", media_type: "application/pdf", data: file.data.toString("base64") };
-        else {
-          send({ type: "progress", stage: "uploading", message: "Uploading the large PDF to Claude…" });
-          uploadedFileId = await uploadPdf(apiKey, new Uint8Array(file.data), file.filename!, abort.signal);
-          pdfSource = { type: "file", file_id: uploadedFileId };
-        }
+        // Always reference the PDF via the Files API: no base64 copy or multi-MB JSON body on the Worker,
+        // and PDFs up to 50 MB fit (inline requests are capped at 32 MB). Deleted in `finally`.
+        send({ type: "progress", stage: "uploading", message: "Sending the PDF to Claude…" });
+        uploadedFileId = await uploadPdf(apiKey, data, fileName, abort.signal);
+        const pdfSource = { type: "file" as const, file_id: uploadedFileId };
         send({ type: "progress", stage: "extracting", message: "Pass 1 of 2 · Claude Haiku is reading the PDF, finding forms, facts and their positions." });
         // Preview items are shape-checked only; cross-references are validated on the complete result.
         let preview = new TopLevelArrayItems(onExtractionItem);
@@ -97,7 +95,7 @@ export default defineEventHandler(async event => {
           { type: "text", text: `AUTHORITATIVE CRITERIA:\n${criteriaText}` },
           { type: "text", text: `UNTRUSTED EXTRACTED DOCUMENT DATA:\n${JSON.stringify(extraction)}` },
         ] });
-        send({ type: "result", referral: toReferral(extraction, validateEvaluation(evaluated, extraction), patientName, file.filename!) });
+        send({ type: "result", referral: toReferral(extraction, validateEvaluation(evaluated, extraction), patientName, fileName) });
       } catch (error) {
         send({ type: "error", message: error instanceof AnalysisFailure ? error.message
           : `The analysis did not pass evidence validation (${validationReason(error)}). No result was applied. Please retry or review the PDF manually.` });

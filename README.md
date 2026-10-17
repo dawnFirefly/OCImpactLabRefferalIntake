@@ -81,7 +81,7 @@ Original referral packets, their contents, generated patient screenshots, creden
 
 ## Three-page scaffold
 
-- `/`: referral intake dashboard: summary counts, search, status/priority filters, sorting, inline review status (Open, In review, Needs info, Approved, Denied — set manually by the coordinator), and a 2-hour review countdown from the received time. **Add applicant** uploads one combined referral PDF, which the server stores (see below). Opening an *Open* referral marks it *In review*.
+- `/`: referral intake dashboard: summary counts, search, status/priority filters, sorting, inline review status (Open, In review, Needs info, Approved, Denied — set manually by the coordinator), and a 2-hour review countdown from the received time. **Add applicant** uploads one combined referral PDF, which the server stores (see below), then opens the processor and automatically starts Claude analysis. Analysis failures appear in the processor with a retry action; the saved applicant remains available. Opening an *Open* referral marks it *In review*.
 - `/processor`: the existing PDF → information nodes → checklist workspace.
 - `/summary`: placeholder summary, items needing attention, and recommended changes.
 

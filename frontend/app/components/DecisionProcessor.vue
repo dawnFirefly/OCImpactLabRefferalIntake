@@ -55,7 +55,8 @@ const dragging = ref(false),
   uploadInput = ref<HTMLInputElement | null>(null);
 /** Opened fact/card/source. While set, the PDF list hides and the source review panel takes the right side. */
 const review = ref<ReviewTarget | null>(null);
-const { fitView, zoomIn, zoomOut } = useVueFlow();
+const { fitView, zoomIn, zoomOut, getViewport, setViewport } = useVueFlow();
+const followingNodes = ref(true);
 const displayedDocuments = computed(() => referral.value.documents);
 function switchApplicant(event: Event) {
   const id = (event.target as HTMLSelectElement).value;
@@ -113,9 +114,9 @@ const visibleSections = computed(() => (referral.value.sections || []).filter(s 
   (live.value && !visibleFacts.value.length) ||
   visibleFacts.value.some(f => f.section_ids?.includes(s.id)) || (s.status === "missing" && group.value === "All factors" && graphPage.value === 0)));
 // Follow the newest streamed facts so new nodes appear in view.
-watch(() => referral.value.facts.length, () => { if (live.value) graphPage.value = factPageCount.value - 1; });
+watch(() => referral.value.facts.length, () => { if (live.value && followingNodes.value) graphPage.value = factPageCount.value - 1; });
 // When the validated result replaces the live preview, start from the first page again.
-watch(live, (now, before) => { if (before && !now) graphPage.value = 0; });
+watch(live, (now, before) => { if (before && !now && followingNodes.value) graphPage.value = 0; });
 function uncertain(status: string) {
   return ["uncertain", "conflicting", "redacted", "questioned", "concern"].includes(status);
 }
@@ -143,6 +144,7 @@ const graphEdges = computed<Edge[]>(() => [
 ]);
 /** A form node points to the requirements its facts support; it does not open the PDF. */
 function openSection(section: { id: string }) {
+  pauseFollowing();
   selectedFact.value = null;
   closeReview();
   revealRules(referral.value.facts.filter((f) => f.section_ids?.includes(section.id)).flatMap((f) => f.rule_ids));
@@ -252,6 +254,7 @@ function revealRules(ids: string[]) {
 }
 /** A fact node selects the fact and jumps to its requirements; the PDF opens from a requirement. */
 function selectFact(f: Fact) {
+  pauseFollowing();
   selectedFact.value = f.id;
   closeReview();
   revealRules(f.rule_ids);
@@ -314,7 +317,28 @@ watch([group, selectedDoc], () => {
 });
 // Wait for Vue Flow to measure new cards before moving the camera.
 let pendingFocusNode: string | undefined;
+function pauseFollowing() {
+  followingNodes.value = false;
+  // Interrupt an in-flight camera transition at its current position.
+  setViewport(getViewport(), { duration: 0 });
+}
+function pauseForGraphGesture({ event }: { event: { sourceEvent?: unknown } | WheelEvent }) {
+  // Vue Flow also emits camera events for fitView; only user input pauses follow.
+  if (event && ("sourceEvent" in event ? event.sourceEvent : event instanceof Event)) {
+    followingNodes.value = false;
+  }
+}
+function resumeFollowing() {
+  followingNodes.value = true;
+  if (live.value && graphPage.value !== factPageCount.value - 1) {
+    graphPage.value = factPageCount.value - 1;
+    return; // Focus after the new page's nodes initialize.
+  }
+  pendingFocusNode = graphNodes.value.at(-1)?.id;
+  frameInitializedNodes();
+}
 function frameInitializedNodes() {
+  if (!followingNodes.value) return;
   if (pendingFocusNode) {
     const id = pendingFocusNode;
     pendingFocusNode = undefined;
@@ -334,9 +358,9 @@ watch(
   },
   { flush: "pre" },
 );
-watch(() => referral.value.id, () => { selectedFact.value = null; selectedDoc.value = null; review.value = null; group.value = "All factors"; graphPage.value = 0; });
+watch(() => referral.value.id, () => { followingNodes.value = true; selectedFact.value = null; selectedDoc.value = null; review.value = null; group.value = "All factors"; graphPage.value = 0; });
 // Reopening/closing the review resizes the graph column; refit once the grid transition settles.
-watch(() => review.value === null, () => setTimeout(() => { fitView({ padding: 0.22, maxZoom: 1, duration: 150 }); drawOutputs(); }, 220));
+watch(() => review.value === null, () => setTimeout(() => { if (followingNodes.value) fitView({ padding: 0.22, maxZoom: 1, duration: 150 }); drawOutputs(); }, 220));
 watch(() => referral.value.checklist.rules.map(r => r.status).join(","), () => nextTick(drawOutputs));
 onMounted(() => window.addEventListener("resize", drawOutputs));
 onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
@@ -483,6 +507,13 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
           @click="fitView({ padding: 0.22, maxZoom: 1 })"
           ><Maximize :size="14"
         /></Button>
+        <Button
+          size="sm"
+          :variant="followingNodes ? 'secondary' : 'outline'"
+          :aria-pressed="followingNodes"
+          :title="followingNodes ? 'Following new nodes. Click to pause.' : 'Resume following new nodes'"
+          @click="followingNodes ? pauseFollowing() : resumeFollowing()"
+        >{{ followingNodes ? 'Following' : 'Follow' }}</Button>
       </div>
       <div class="graph-legend"><span>PDF → forms → facts → application</span><span v-if="live" class="live-key">● Live · provisional nodes</span><span class="missing-key">Red: missing</span><span class="uncertain-key">┄ Yellow: uncertain</span></div>
       <div class="graph-wrap">
@@ -495,9 +526,12 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             :min-zoom="0.25"
             :max-zoom="1.6"
             fit-view-on-init
+            @move-start="pauseForGraphGesture"
             @move="drawOutputs"
             @move-end="drawOutputs"
             @nodes-initialized="frameInitializedNodes"
+            @node-click="pauseFollowing"
+            @node-drag-start="pauseFollowing"
             @node-drag="drawOutputs"
           >
             <Background :gap="18" :size="0.6" pattern-color="#cbd7c0" />

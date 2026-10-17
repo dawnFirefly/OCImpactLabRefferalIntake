@@ -12,7 +12,7 @@ import { REVIEW_WINDOW_MS, type IntakeInput } from "~/composables/useReviewWorks
 /** Add (with PDF upload) or edit (details only) a stored applicant. */
 const props = defineProps<{ applicant?: Referral | null }>();
 const open = defineModel<boolean>("open", { required: true });
-const { createStoredApplicant, updateStoredApplicant } = inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
+const { createStoredApplicant, updateStoredApplicant, selectApplicant, analyze, referral } = inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
 
 const editing = computed(() => !!props.applicant?.intake);
 const file = shallowRef<File | null>(null);
@@ -81,9 +81,17 @@ async function save() {
     receivedAt: Number.isNaN(received.getTime()) ? undefined : received.toISOString(),
   };
   try {
-    if (editing.value) await updateStoredApplicant(props.applicant!.id, fields);
-    else await createStoredApplicant(fields, file.value!);
-    open.value = false;
+    if (editing.value) {
+      await updateStoredApplicant(props.applicant!.id, fields);
+      open.value = false;
+    } else {
+      const applicant = await createStoredApplicant(fields, file.value!);
+      selectApplicant(applicant.id);
+      open.value = false;
+      await navigateTo("/processor");
+      // Start only after navigation, and never analyze a different selection.
+      if (referral.value.id === applicant.id) void analyze();
+    }
   } catch (e: any) {
     error.value = e?.data?.statusMessage || e?.statusMessage || "Could not save. Try again.";
   } finally {
@@ -98,7 +106,7 @@ async function save() {
       <DialogHeader>
         <DialogTitle>{{ editing ? "Edit applicant details" : "Add applicant" }}</DialogTitle>
         <DialogDescription>
-          {{ editing ? "Update intake details. The stored referral PDF is not changed." : "Upload the combined referral packet. Review is due 2 hours after the referral was received." }}
+          {{ editing ? "Update intake details. The stored referral PDF is not changed." : "Upload the combined referral packet. Adding the applicant opens the processor and starts Claude analysis. Review is due 2 hours after receipt." }}
         </DialogDescription>
       </DialogHeader>
 

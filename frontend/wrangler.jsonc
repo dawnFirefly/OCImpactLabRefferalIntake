@@ -7,6 +7,11 @@
   "build": { "command": "npm run build:worker" },
   "compatibility_date": "2026-10-17",
   "compatibility_flags": ["nodejs_compat"],
+  // A two-pass streamed analysis parses thousands of stream events; the 30 s default CPU budget can run out (Error 1102).
+  // Requires the Workers Paid plan (max 300000 ms). Waiting on Claude does not count as CPU time.
+  "limits": { "cpu_ms": 300000 },
+  // Workers Logs: outcome, CPU and wall time per request in the dashboard (no request bodies are logged).
+  "observability": { "enabled": true },
   "assets": {
     "binding": "ASSETS",
     "directory": ".output/public"

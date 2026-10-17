@@ -90,7 +90,7 @@ export function useReviewWorkspace() {
     const source = current.documents[0];
     beforeAnalysis = current;
     referral.value = {
-      id: current.id, title: name, status: "analyzing", revision: current.revision,
+      id: current.id, title: name, intake: current.intake, status: "analyzing", revision: current.revision,
       documents: [{ id: "source-pdf", name: source?.name || "applicant.pdf", page_count: source?.page_count ?? null, status: "analyzing", error: null, pages: [], local_url: source?.local_url, storage: source?.storage }],
       sections: [], facts: [], evidence: [], error: null, audit: [],
       checklist: rubric("pending"),
@@ -133,6 +133,8 @@ export function useReviewWorkspace() {
       if (request.signal.aborted || referral.value.id !== current.id) return;
       beforeAnalysis = null;
       result.id = current.id;
+      result.intake = current.intake;
+      if (current.intake) result.title = current.title;
       result.documents[0]!.local_url = current.documents[0]?.local_url;
       result.documents[0]!.storage = current.documents[0]?.storage;
       referral.value = result;
@@ -213,6 +215,7 @@ export function useReviewWorkspace() {
     const packet = await $fetch<StoredPacket>("/api/applicants", { method: "POST", body: form });
     const record = storedReferral(packet);
     applicants.value.push(record);
+    filesByApplicant.set(record.id, file);
     return record;
   }
   /** Saves intake/status edits, keeping the in-session review (facts, checklist, audit) intact. */
