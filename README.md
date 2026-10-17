@@ -74,3 +74,48 @@ npm run build
 Contract tests cover source/section/fact/rule links, invalid model output, missing/redacted evidence, precedence, recommendations and provider failures. Live model accuracy must be evaluated separately with a valid replacement key; historical outcome labels are never model inputs.
 
 The only routes remain `/` (skeletal applicant dashboard), `/processor`, and `/summary` (placeholder). See [the integration details](docs/claude-integration.md) and [page boundaries](docs/page-handoff.md).
+
+Read [AGENTS.md](AGENTS.md), the relevant skill in [.agents/skills](.agents/skills), and [the Claude integration boundary](docs/claude-integration.md). The analysis provider is in `frontend/app/services/analysis.ts`; fixtures and state are separate from the screen.
+
+Original referral packets, their contents, generated patient screenshots, credentials, and build output must stay out of Git. The supplied PDFs are external examples and are not included here.
+
+## Three-page scaffold
+
+- `/`: referral intake dashboard: summary counts, search, status/priority filters, sorting, inline review status (Open, In review, Needs info, Approved, Denied — set manually by the coordinator), and a 2-hour review countdown from the received time. **Add applicant** uploads one combined referral PDF, which the server stores (see below). Opening an *Open* referral marks it *In review*.
+- `/processor`: the existing PDF → information nodes → checklist workspace.
+- `/summary`: placeholder summary, items needing attention, and recommended changes.
+
+Use **Continue to summary** to demonstrate the flow. Uploading a PDF in the processor starts Claude analysis; there is no summary generation yet. Uploaded applicants and their PDFs persist on the server. Review edits remain in memory across route navigation and reset on reload. Page ownership and shared contracts are documented in [the page handoff](docs/page-handoff.md).
+
+## Packet storage
+
+**Add applicant** opens a dialog that posts a name, optional intake details (received time, priority, referring facility, referrer contact, assigned reviewer, notes), and one PDF (max 50 MB, checked for a `%PDF-` header) to Nuxt server routes in `frontend/server/`:
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/applicants` | List stored applicants |
+| `POST /api/applicants` | Multipart `name` + `file`; stores the PDF |
+| `GET /api/applicants/:id/pdf` | Stream the stored PDF to the processor preview |
+| `PATCH /api/applicants/:id` | Update intake details or review status (JSON) |
+| `DELETE /api/applicants/:id` | Delete (local/R2) or move to Drive trash |
+
+**On Cloudflare (the deployed site): R2.** `nuxt.config.ts` declares the R2 bucket `referralready` as the binding `REFERRAL_PACKETS`; Cloudflare's build turns that into the deployed Worker config, so no dashboard binding is needed. PDFs are stored at `packets/<id>.pdf` and applicant details in a single `index.json`. Uploads are refused once stored PDFs would exceed `NUXT_STORAGE_LIMIT_GB` (default 9 GB, under R2's 10 GB free tier). Protect the site with Cloudflare Access before storing real referrals: these routes have no login of their own.
+
+To test the Cloudflare build locally with a simulated bucket:
+
+```sh
+cd frontend
+WORKERS_CI=1 NITRO_PRESET=cloudflare_module npx nuxt build
+npx wrangler dev -c .output/server/wrangler.json
+```
+
+**Local development default: local disk.** With no configuration, PDFs and an `index.json` go to `frontend/.data/referrals/` (Git-ignored). This needs no setup but only lives on the machine running the server.
+
+**Optional: Google Drive.** Copy `frontend/.env.example` to `frontend/.env` and fill in all four values; the server then stores and lists packets in one Drive folder (applicant metadata is kept in each file's `appProperties`), so everyone using that server sees the same list.
+
+1. In Google Cloud Console, enable the **Google Drive API**, then create an OAuth client ID (type *Web application*) with `https://developers.google.com/oauthplayground` as an authorized redirect URI.
+2. In the [OAuth Playground](https://developers.google.com/oauthplayground), open the settings gear, choose **Use your own OAuth credentials**, and enter the client ID and secret. Authorize the scope `https://www.googleapis.com/auth/drive`, then exchange the code for tokens and copy the **refresh token**. If the OAuth consent screen is in *Testing* mode, refresh tokens expire after 7 days; publish it, or regenerate the token when it expires.
+3. Create a Drive folder and copy its ID from the URL (`drive.google.com/drive/folders/<FOLDER_ID>`). Shared drives work too.
+4. Restart `npm run dev`. Upload responses show `"storage": "google_drive"`.
+
+Referral packets contain patient information. Use a Drive account and folder your organization has approved for that data, keep sharing restricted, and never commit `.env`. There is no authentication on these routes: run the server only on a trusted machine or network.

@@ -62,11 +62,25 @@ export type PacketDocument = {
   local_url?: string;
   storage?: StoredPacket;
 };
+export type ReviewStatus = "new" | "in_review" | "needs_info" | "approved" | "denied";
+/** Coordinator-entered intake details for a stored applicant (not model output). */
+export type Intake = {
+  receivedAt: string;
+  source: string;
+  contact: string;
+  priority: "routine" | "urgent";
+  reviewer: string;
+  notes: string;
+  reviewStatus: ReviewStatus;
+  uploadedAt: string;
+  size: number;
+};
 export type Referral = {
   sections?: DocumentSection[];
   recommendation?: Recommendation;
   id: string;
   title: string;
+  intake?: Intake;
   status: string;
   revision: number;
   documents: PacketDocument[];

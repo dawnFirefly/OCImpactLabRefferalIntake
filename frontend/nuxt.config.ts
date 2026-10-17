@@ -5,7 +5,16 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   nitro: {
     ignore: ["**/local-demo/**"],
-    cloudflare: { nodeCompat: true },
+    cloudflare: {
+      nodeCompat: true,
+      wrangler: {
+        name: "ocimpactlabrefferalintake",
+        r2_buckets: [
+          { binding: "REFERRAL_PDFS", bucket_name: "referralready" },
+          { binding: "REFERRAL_PACKETS", bucket_name: "referralready" },
+        ],
+      },
+    },
   },
   runtimeConfig: {
     anthropicApiKey: "",
@@ -13,6 +22,8 @@ export default defineNuxtConfig({
     cloudflareAccessTeamDomain: "",
     cloudflareAccessAudience: "",
     workspaceAllowedEmails: "",
+    googleDrive: { clientId: "", clientSecret: "", refreshToken: "", folderId: "" },
+    storageLimitGb: 9,
     // Pass 1 reads the PDF and locates facts; pass 2 links facts to admission criteria.
     claudeExtractionModel: "claude-haiku-5-5",
     claudeReviewModel: "claude-sonnet-5-5",

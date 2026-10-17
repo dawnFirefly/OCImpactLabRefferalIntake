@@ -386,7 +386,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
                   {{
                     live ? "Claude is reading…" : doc.page_count
                       ? `${doc.page_count} pages · ${doc.status === "analyzed" ? "Claude reviewed" : doc.status === "provided_demo" ? "provided packet" : "example"}`
-                      : "Uploaded · not analyzed"
+                      : doc.status === "stored" ? "Stored on server · not analyzed" : "Uploaded · not analyzed"
                   }}
                 </div>
               </div>

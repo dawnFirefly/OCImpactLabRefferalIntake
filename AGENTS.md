@@ -7,6 +7,7 @@ The user has now authorized **a local Nuxt server backend for Claude PDF analysi
 - Keep the minimal three-section workspace: one applicant PDF on the left, connected PDF → form/section → patient-fact nodes in the middle, result checklist on the right.
 - Use Vue 3 / Nuxt 4 and actual shadcn-vue components. Vue Flow owns graph layout, pan, zoom, and source-to-fact edges.
 - The user authorized three routes only: applicant dashboard, existing decision processor, and placeholder summary. Keep the dashboard/summary skeletal; use Cloudflare Access for remote access without adding application login routes, admission automation, or a Python backend.
+- The dashboard's **Add applicant** (from main) uploads one PDF with intake details to server storage (`/api/applicants`: local disk, Google Drive, or R2 on Cloudflare); see README "Packet storage".
 - Do not implement or install local OCR, Tesseract, PDF text extraction, or image-based extraction. Do not extract the supplied packets as part of frontend work.
 - Do not mistake mock fixtures for analysis. Uploading a PDF in the processor is the user's explicit request to analyze it: the upload starts Claude analysis immediately, with no patient name required (Claude reads the name; identity is cross-checked only when a dashboard applicant name exists). Previews of provided local packets (R01–R11) never auto-analyze; they use the Analyze with Claude button. Save PDF to private storage (private R2) stays a separate explicit action.
 
@@ -18,7 +19,7 @@ npm ci
 npm run dev
 ```
 
-Development URL: `http://127.0.0.1:3000`. Synthetic mode needs no key. Live analysis needs server-only `NUXT_ANTHROPIC_API_KEY`; see `frontend/.env.example`. The tracked `frontend/.env` contains an empty variable declaration only; use ignored `.env.local` (the dev script loads `.env.local`) for optional local credentials. Never save a key pasted in chat.
+Development URL: `http://127.0.0.1:3000`. Synthetic mode needs no key. Live analysis needs server-only `NUXT_ANTHROPIC_API_KEY`; see `frontend/.env.example`. `frontend/.env` and `.env.local` are ignored and must never be committed; use them (the dev script loads `.env.local`) for optional local credentials. Never save a key pasted in chat.
 
 Before delivery: `npm test`, `npm run typecheck` and `npm run build` from `frontend/`. For UI changes, render the actual screen and check the relevant interaction. Keep these commands and the README accurate.
 
@@ -26,7 +27,8 @@ Before delivery: `npm test`, `npm run typecheck` and `npm run build` from `front
 
 - `frontend/app/app.vue`: root session provider and Nuxt router outlet.
 - `frontend/app/layouts/default.vue`: lightweight shared navigation.
-- `frontend/app/pages/index.vue`: applicant dashboard skeleton and session-local creation.
+- `frontend/app/pages/index.vue`: applicant dashboard; creates applicants by uploading one PDF to the server.
+- `frontend/server/`: `/api/applicants` routes and `utils/packetStore.ts` (Cloudflare R2 bucket `referralready` when deployed; otherwise Google Drive when `NUXT_GOOGLE_DRIVE_*` is set, else local disk in `.data/referrals`). See README "Packet storage".
 - `frontend/app/pages/processor.vue`: processor route and summary continuation.
 - `frontend/app/components/DecisionProcessor.vue`: three panels, graph, checklist. Clicking a fact or form node never opens the PDF: it scrolls Application review to the linked requirements and flashes them. Clicking a requirement card (or the PDF row) switches to review mode: the PDF list hides, the graph narrows, and `SourceReviewPanel.vue` shows the continuous PDF scrolled to the cited line and highlighted (the originating fact's quote first), with the adjustment form.
 - `frontend/app/pages/summary.vue`: placeholder sections only; no decision generation.

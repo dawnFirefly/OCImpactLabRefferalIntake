@@ -10,7 +10,8 @@
     "directory": ".output/public"
   },
   "r2_buckets": [
-    { "binding": "REFERRAL_PDFS", "bucket_name": "referralready" }
+    { "binding": "REFERRAL_PDFS", "bucket_name": "referralready" },
+    { "binding": "REFERRAL_PACKETS", "bucket_name": "referralready" }
   ],
   "vars": {
     "NUXT_WORKSPACE_ORIGIN": "https://ocimpactlabrefferalintake.notnaren.workers.dev",
