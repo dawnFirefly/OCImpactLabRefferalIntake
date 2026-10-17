@@ -24,14 +24,14 @@ cd frontend
 npm run dev
 ```
 
-Pass the containing directory, not an individual PDF. The script creates Git-ignored symlinks, without copying or analyzing PDF contents. The document panel lists R01 and R02 as separate previewable referrals. Choose **Synthetic flow** to demonstrate information nodes and authored highlights; choose **Provided PDFs** to return to the original packets. The original packets have no inferred information or highlights until Claude is connected.
+Pass the containing directory, not an individual PDF. The script creates Git-ignored symlinks, without copying or analyzing PDF contents. The applicant picker switches between R01 and R02, each with one combined PDF. R01 shows nine mock information nodes and a 4/9 document-presence checklist from the supplied inventory; clinical findings remain unverified. Choose **Synthetic flow** to demonstrate information nodes and authored highlights; choose **Provided PDFs** to return to the original packets. The original packets have no extracted patient values or verified highlights until Claude is connected.
 
 These links are local demo assets. Do not publish or distribute a build containing the provided packets; keep the ignored `frontend/public/local-demo/` directory out of shared artifacts.
 
 ## What works
 
 - Three-panel workspace with synthetic, clearly labeled example data.
-- Many source PDFs linked to one information node, and nodes linked to checklist items.
+- One combined PDF per applicant, linked to information nodes and checklist items. Repeated information can cite multiple pages of the same packet.
 - Graph selection, pan, zoom, category filtering, and node paging.
 - Checklist expansion, completion counts, and session-local status adjustments.
 - Information review/correction with original values preserved.

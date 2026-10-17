@@ -5,13 +5,13 @@ description: Extend or repair ReferralReady's minimal Nuxt frontend, patient-inf
 
 # Referral frontend
 
-Read root `AGENTS.md` for the current scope. The accepted direction is three visible sections: source PDFs, information nodes, checklist. Avoid expanding it into a complete website.
+Read root `AGENTS.md` for the current scope. The accepted direction is three visible sections: one applicant PDF, information nodes, checklist. Avoid expanding it into a complete website.
 
 Use `frontend/app/app.vue` for the composition and graph slots, `useReviewWorkspace.ts` for session state, and `data/demo.ts` for fictional fixtures. Prefer extracting focused Vue components as the screen grows rather than adding service logic to the template.
 
 ## Graph invariants
 
-- One matching identity fact can link to several source documents; each source uses an evidence ID.
+- One applicant has one combined PDF. One identity fact can link to several passages/pages in that PDF; each citation uses an evidence ID. R01 uses summary-only mock nodes and checklist, with no invented patient values or source anchors. Switch applicants separately from PDF preview.
 - Different dated measurements may be distinct facts. A different value is not automatically a contradiction.
 - Facts can support multiple checklist items. Keep `Fact.rule_ids` and `Rule.fact_ids` consistent.
 - A selected fact highlights its incoming document edges and outgoing checklist paths. Recalculate the latter after pan/zoom, drag, resizing, and checklist expansion/scrolling.

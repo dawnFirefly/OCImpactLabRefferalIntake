@@ -10,7 +10,7 @@ The app is a frontend-only Nuxt 4 / Vue 3 scaffold using shadcn-vue and Vue Flow
 
 ```ts
 analyze(
-  files: File[],
+  file: File,
   onSnapshot: (snapshot: Referral) => void,
   signal?: AbortSignal,
 ): Promise<Referral>
@@ -18,7 +18,7 @@ analyze(
 
 `pendingClaudeProvider` intentionally throws a clear integration-pending error. It is not invoked by the current attachment UI. The eventual server implementation can use Python, as originally requested, when backend work is explicitly resumed. Keep the Claude API key server-side.
 
-Use `Referral` in `frontend/app/types.ts` as the current screen contract. Version/validate a real transport schema before relying on model responses. Every snapshot contains documents, facts, evidence, checklist rules, and audit state. Stable IDs preserve graph identity across updates.
+Use `Referral` in `frontend/app/types.ts` as the current screen contract. Version/validate a real transport schema before relying on model responses. Every snapshot contains exactly one applicant PDF in `documents`, facts, evidence, checklist rules, and audit state. Stable IDs preserve graph identity across updates.
 
 ### Evidence links
 
@@ -31,7 +31,7 @@ Use `Referral` in `frontend/app/types.ts` as the current screen contract. Versio
 
 The source-review dialog renders the cited PDF page and overlays the provided normalized bounding box. It scrolls the highlight into view. Source switching and page navigation are implemented by `PdfSourceViewer.client.vue`. The demo's anchors are authored alongside synthetic PDF rows, not inferred. Processing streams, model-produced evidence/anchors, server persistence, and criteria evaluation are future work. Browser preview of an attached file does not analyze its content.
 
-The optional local-demo linker exposes R01/R02 as ignored static symlinks and a metadata manifest. These are separate preview-only referrals. Loading one clears fictional facts and checklist results; only the synthetic flow has authored demonstration anchors. Do not publish the local-only static assets.
+The optional local-demo linker exposes R01/R02 as ignored static symlinks and a metadata manifest. These are separate applicants selected through the applicant picker. Each has one combined PDF. R01 loads an explicitly labeled mock document-presence checklist and nine nodes based on the user-supplied packet inventory. It has no patient values, page anchors, or extracted findings. Checklist review opens the original PDF at page 1 for manual review, without claiming a source citation. R02 remains awaiting Claude. Only the synthetic flow has authored demonstration anchors. Do not publish the local-only static assets.
 
 ## Domain sources for the next task
 

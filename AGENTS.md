@@ -4,10 +4,10 @@
 
 This repository currently contains **a frontend scaffold only**. The user explicitly stopped backend/OCR implementation. Document understanding will use a Claude model in a later task.
 
-- Keep the minimal three-section workspace: PDF list on the left, connected patient-information nodes in the middle, result checklist on the right.
+- Keep the minimal three-section workspace: one applicant PDF on the left, connected patient-information nodes in the middle, result checklist on the right.
 - Use Vue 3 / Nuxt 4 and actual shadcn-vue components. Vue Flow owns graph layout, pan, zoom, and source-to-fact edges.
 - Do not add a dashboard, navigation shell, admission workflow, authentication, or a Python backend unless the next user task asks for it.
-- Do not implement or install local OCR, Tesseract, PDF text extraction, or image-based extraction. Do not analyze the supplied packets as part of frontend work.
+- Do not implement or install local OCR, Tesseract, PDF text extraction, or image-based extraction. Do not extract the supplied packets as part of frontend work.
 - Do not mistake mock fixtures for analysis. Files attached in the current UI are browser-local and await a future Claude integration.
 
 ## Start here
@@ -48,7 +48,7 @@ Read the relevant project skill when continuing work:
 
 The original R01/R02 packets are external files, not repository fixtures. Do not commit PDFs, screenshots of real packets, extracted packet text, credentials, or patient data. Keep fixtures fictional. Blacked-out data in the challenge examples means redacted for privacy, not missing.
 
-For explicitly requested local packet previews, `scripts/link-demo-pdfs.mjs` creates ignored symlinks and a metadata manifest in `frontend/public/local-demo/`. R01/R02 remain separate referrals. The UI discovers these on mount and offers a switch back to the synthetic flow. Never assign fictional facts/anchors to a real packet. Do not distribute a build containing these local-only assets.
+For explicitly requested local packet previews, `scripts/link-demo-pdfs.mjs` creates ignored symlinks and a metadata manifest in `frontend/public/local-demo/`. R01/R02 remain separate referrals. The UI discovers these on mount and offers a switch back to the synthetic flow. R01 has an explicitly labeled mock review based only on the user-supplied packet inventory in `data/r01Mock.ts`. No patient values, verified page citations, or highlights are fabricated. R02 remains pending Claude. Never assign fictional patient facts/anchors to a real packet. Do not distribute a build containing these local-only assets.
 
 Historical labels supplied by IHH are evaluation outcomes; reasons were not recorded. They must not be used to fabricate rationales or hardcode model decisions. Distinguish evidence found, not found, conflicting, and coordinator-confirmed. A checklist count is not a clinical admission decision.
 
@@ -57,3 +57,7 @@ The challenge's official criteria are linked in `docs/claude-integration.md`. Wh
 ## Git
 
 Do not commit generated dependencies, `.nuxt`, `.output`, local attachments, or secrets. This file does not authorize additional pushes or communications beyond the user's task. Follow the user's commit-signing instructions when making authorized commits; never expose private signing keys.
+
+## Single-packet invariant
+
+One applicant has exactly one combined PDF containing all document sections. R01 and R02 are separate selectable applicants. Uploads replace the active applicant with one PDF; reject multi-file drops. Repeated facts may cite several pages of the same packet. The future provider takes one `File`.

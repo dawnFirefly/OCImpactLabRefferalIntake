@@ -63,11 +63,18 @@ const editValue = ref(""),
 const previewDocument = ref<PacketDocument | null>(null),
   previewOpen = ref(false);
 const { fitView, zoomIn, zoomOut } = useVueFlow();
-const displayedDocuments = computed(() =>
-  mode.value === "provided"
-    ? providedDocuments.value
-    : referral.value.documents,
-);
+const displayedDocuments = computed(() => referral.value.documents);
+function switchApplicant(event: Event) {
+  const id = (event.target as HTMLSelectElement).value;
+  const doc = providedDocuments.value.find((d) => d.id === id);
+  if (!doc) return;
+  useProvidedDocument(doc);
+  selectedDoc.value = null;
+  selectedFact.value = null;
+  group.value = "All factors";
+  graphPage.value = 0;
+}
+const isPacketMock = computed(() => referral.value.status === "mock_review");
 function showProvided() {
   graphPage.value = 0;
   if (providedDocuments.value[0]) {
@@ -91,7 +98,7 @@ const filteredFacts = computed(() =>
   referral.value.facts.filter(
     (f) =>
       (group.value === "All factors" || f.group === group.value) &&
-      (!selectedDoc.value ||
+      (!selectedDoc.value || isPacketMock.value ||
         f.evidence_ids.some(
           (id) =>
             referral.value.evidence.find((e) => e.id === id)?.document_id ===
@@ -113,7 +120,7 @@ const graphNodes = computed<Node[]>(() => {
       ),
     ),
   );
-  const docs = referral.value.documents.filter((d) => docIds.has(d.id));
+  const docs = referral.value.documents.filter((d) => isPacketMock.value || docIds.has(d.id));
   return [
     ...docs.map((d, i) => ({
       id: d.id,
@@ -131,7 +138,7 @@ const graphNodes = computed<Node[]>(() => {
 });
 const graphEdges = computed<Edge[]>(() =>
   visibleFacts.value.flatMap((f) => {
-    const docs = [
+    const docs = isPacketMock.value ? referral.value.documents.map((d) => d.id) : [
       ...new Set(
         f.evidence_ids
           .map(
@@ -183,7 +190,7 @@ function ruleValue(rule: Rule) {
 }
 function ruleDetail(rule: Rule) {
   const labels: Record<string, string> = {
-    unknown: "Not found",
+    unknown: isPacketMock.value ? "Not evaluated" : "Not found",
     concern: "Needs clarification",
     not_applicable: "Not applicable",
   };
@@ -209,7 +216,7 @@ function demo() {
 }
 function openDocument(doc: PacketDocument) {
   if (doc.status === "provided_demo") {
-    useProvidedDocument(doc);
+    if (referral.value.id !== doc.id) useProvidedDocument(doc);
     selectedFact.value = null;
   }
   selectedDoc.value = doc.id;
@@ -329,13 +336,19 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
       <header class="panel-head">
         <div class="eyebrow"><span class="step">01</span> Sources</div>
         <div class="head-row">
-          <h1 id="documents-title">Documents</h1>
+          <h1 id="documents-title">Applicant PDF</h1>
           <span class="muted tiny mono">{{
             String(displayedDocuments.length).padStart(2, "0")
           }}</span>
         </div>
       </header>
       <div class="scroll-body">
+        <div v-if="mode === 'provided'" class="review-field" style="padding: 16px 20px 0">
+          <label for="applicant">Applicant</label>
+          <select id="applicant" class="evidence-select" :value="referral.id" @change="switchApplicant">
+            <option v-for="doc in providedDocuments" :key="doc.id" :value="doc.id">{{ doc.name.replace('.pdf', '') }} · separate applicant</option>
+          </select>
+        </div>
         <div class="files">
           <div v-for="doc in displayedDocuments" :key="doc.id">
             <button
@@ -369,14 +382,13 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             ref="uploadInput"
             type="file"
             accept="application/pdf,.pdf"
-            multiple
             class="sr-only"
             @change="upload(($event.target as HTMLInputElement).files)"
-          /><Plus :size="18" /><span>Add PDFs</span></label
+          /><Plus :size="18" /><span>Replace applicant PDF</span></label
         >
         <div v-if="mode === 'provided'" class="local-label">
-          R01 and R02 are separate redacted referrals.<br />Preview only;
-          analysis awaits Claude.
+          One applicant · one combined PDF.<br />
+          {{ isPacketMock ? 'R01 mock review · based on your packet summary, not extracted findings.' : 'R02 preview · analysis awaits Claude.' }}
         </div>
         <div v-else-if="awaitingClaude" class="local-label">
           Files are attached in this browser session.<br />Claude analysis will
@@ -410,7 +422,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
           <h2 id="processor-title">Processor</h2>
           <span class="progress-caption"
             ><span class="status-dot" />{{
-              awaitingClaude ? "Awaiting Claude" : "Preview"
+              isPacketMock ? "Mock review" : awaitingClaude ? "Awaiting Claude" : "Preview"
             }}</span
           >
         </div>
@@ -419,11 +431,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
         <label class="sr-only" for="factor-group">Information category</label
         ><select id="factor-group" v-model="group">
           <option
-            v-for="g in [
-              'All factors',
-              'Personal information',
-              'Labs & vitals',
-            ]"
+            v-for="g in ['All factors', ...new Set(referral.facts.map((f) => f.group))]"
             :key="g"
           >
             {{ g }}
@@ -464,7 +472,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             fit-view-on-init
             @move="drawOutputs"
             @move-end="drawOutputs"
-            @nodes-initialized="drawOutputs"
+            @nodes-initialized="fitView({ padding: 0.22, maxZoom: 1, duration: 150 })"
             @node-drag="drawOutputs"
           >
             <Background :gap="18" :size="0.6" pattern-color="#cbd7c0" />
@@ -504,9 +512,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
                   {{ data.value }} <span v-if="data.unit">{{ data.unit }}</span>
                 </div>
                 <div class="node-meta">
-                  {{ data.evidence_ids.length }} source{{
-                    data.evidence_ids.length === 1 ? "" : "s"
-                  }}
+                  {{ isPacketMock ? "Mock · supplied packet summary" : `${data.evidence_ids.length} source${data.evidence_ids.length === 1 ? '' : 's'}` }}
                 </div>
                 <span
                   v-if="selectedFact === data.id"
@@ -572,6 +578,10 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
         </div>
       </header>
       <div class="scroll-body" @scroll="drawOutputs">
+        <div v-if="isPacketMock" class="intro-label">
+          Mock checklist · document presence only. Clinical eligibility is not assessed.
+          Historical IHH outcome: deny; reason not recorded. This label does not drive the checklist.
+        </div>
         <div v-if="awaitingClaude" class="intro-label">
           Checklist results will appear after Claude analysis is connected.
         </div>
@@ -639,8 +649,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
         ><DialogHeader
           ><DialogTitle>{{ factEdit?.label || ruleEdit?.text }}</DialogTitle
           ><DialogDescription
-            >Inspect and adjust the synthetic example. Changes last for this
-            browser session.</DialogDescription
+            >Inspect and adjust this {{ isPacketMock ? "mock packet review" : "synthetic example" }}. Changes last for this browser session.</DialogDescription
           ></DialogHeader
         >
         <div class="inspector-grid">
@@ -670,22 +679,21 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             </div>
             <ClientOnly>
               <PdfSourceViewer
-                v-if="currentEvidence && currentDocument?.local_url"
-                :url="currentDocument.local_url"
-                :title="currentDocument.name"
-                :page="currentEvidence.page"
-                :bbox="currentEvidence.bbox"
+                v-if="(currentDocument || (isPacketMock ? referral.documents[0] : undefined))?.local_url"
+                :url="(currentDocument || referral.documents[0])!.local_url!"
+                :title="(currentDocument || referral.documents[0])!.name"
+                :page="currentEvidence?.page || 1"
+                :bbox="currentEvidence?.bbox || null"
               />
             </ClientOnly>
             <div v-if="currentEvidence" class="evidence-quote">
               {{ currentEvidence.quote }}
             </div>
             <div v-else class="empty-evidence">
-              No supporting information in this example.
+              {{ isPacketMock ? "No verified page or highlight for this item. Review the original packet; the summary supplies document presence only." : "No supporting information in this example." }}
             </div>
             <p class="audit-note">
-              Synthetic PDF and authored source highlight. Future Claude results
-              can use the same document, page, and section-anchor contract.
+              {{ isPacketMock ? "Mock review from the supplied packet summary. No patient values or source coordinates were extracted. No highlight is claimed." : "Synthetic PDF and authored source highlight. Future Claude results can use the same document, page, and section-anchor contract." }}
             </p>
           </div>
           <div>

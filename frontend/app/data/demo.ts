@@ -3,11 +3,7 @@ import { demoRowTop, DEMO_PAGE_HEIGHT } from "../lib/demoPdf";
 
 /** Fictional UI fixtures. Never derived from the supplied referral packets. */
 export function createDemo(): Referral {
-  const documents = [
-    { id: "demo-referral", name: "Referral form.pdf", page_count: 3 },
-    { id: "demo-labs", name: "Lab results.pdf", page_count: 2 },
-    { id: "demo-discharge", name: "Discharge notes.pdf", page_count: 5 },
-  ].map((d) => ({ ...d, status: "demo", error: null, pages: [] }));
+  const documents = [{ id: "demo-packet", name: "Jane Doe referral packet.pdf", page_count: 3, status: "demo", error: null, pages: [] }];
   const definitions = [
     [
       "name",
@@ -15,7 +11,7 @@ export function createDemo(): Referral {
       "Personal information",
       "Jane Doe",
       "",
-      ["demo-referral", "demo-discharge"],
+      [1, 3],
     ],
     [
       "bp",
@@ -23,7 +19,7 @@ export function createDemo(): Referral {
       "Labs & vitals",
       "128 / 82",
       "mmHg",
-      ["demo-labs", "demo-discharge"],
+      [2, 3],
     ],
     [
       "insurance",
@@ -31,7 +27,7 @@ export function createDemo(): Referral {
       "Personal information",
       "Medi-Cal",
       "",
-      ["demo-referral", "demo-discharge"],
+      [1, 3],
     ],
     [
       "hemoglobin",
@@ -39,7 +35,7 @@ export function createDemo(): Referral {
       "Labs & vitals",
       "12.8",
       "g/dL",
-      ["demo-labs"],
+      [2],
     ],
     [
       "dob",
@@ -47,7 +43,7 @@ export function createDemo(): Referral {
       "Personal information",
       "May 12, 1984",
       "",
-      ["demo-referral"],
+      [1],
     ],
     [
       "gender",
@@ -55,7 +51,7 @@ export function createDemo(): Referral {
       "Personal information",
       "Female",
       "",
-      ["demo-referral"],
+      [1],
     ],
     [
       "language",
@@ -63,7 +59,7 @@ export function createDemo(): Referral {
       "Personal information",
       "English",
       "",
-      ["demo-referral"],
+      [1],
     ],
     [
       "contact",
@@ -71,7 +67,7 @@ export function createDemo(): Referral {
       "Personal information",
       "Documented",
       "",
-      ["demo-referral"],
+      [1],
     ],
     [
       "referrer",
@@ -79,16 +75,16 @@ export function createDemo(): Referral {
       "Personal information",
       "Demo hospital team",
       "",
-      ["demo-referral"],
+      [1],
     ],
-    ["heart-rate", "Heart rate", "Labs & vitals", "76", "bpm", ["demo-labs"]],
+    ["heart-rate", "Heart rate", "Labs & vitals", "76", "bpm", [2]],
     [
       "temperature",
       "Temperature",
       "Labs & vitals",
       "36.8",
       "°C",
-      ["demo-labs"],
+      [2],
     ],
     [
       "wbc",
@@ -96,18 +92,19 @@ export function createDemo(): Referral {
       "Labs & vitals",
       "7.2",
       "×10³/µL",
-      ["demo-labs"],
+      [2],
     ],
   ] as const;
   const evidence: Referral["evidence"] = [];
   const facts: Fact[] = definitions.map(
     ([key, label, group, value, unit, docs]) => {
-      const ids = docs.map((doc, index) => {
-        const id = `${key}-${doc}`;
+      const ids = docs.map((page) => {
+        const doc = "demo-packet";
+        const id = `${key}-${doc}-${page}`;
         evidence.push({
           id,
           document_id: doc,
-          page: index + 1,
+          page,
           quote: `${label}: ${value}${unit ? " " + unit : ""}`,
           bbox: null,
           confidence: null,

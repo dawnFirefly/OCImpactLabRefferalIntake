@@ -1,3 +1,4 @@
+import { createR01Mock } from "../data/r01Mock";
 import { createDemo } from "../data/demo";
 import type { Referral, Fact, Rule, PacketDocument } from "../types";
 import { createDemoPdf } from "../lib/demoPdf";
@@ -33,7 +34,7 @@ export function useReviewWorkspace() {
     mode.value = "provided";
     error.value = "";
     // Every supplied packet is a separate referral, never one combined patient.
-    referral.value = {
+    referral.value = document.id === "provided-R01" ? createR01Mock(document) : {
       id: document.id,
       title: document.name,
       status: "awaiting_claude",
@@ -85,8 +86,8 @@ export function useReviewWorkspace() {
       error.value = "Choose PDF files up to 50 MB each.";
       return;
     }
-    if (list.length > 6) {
-      error.value = "Attach up to six PDFs for one referral.";
+    if (list.length !== 1) {
+      error.value = "Choose one combined PDF per applicant. Switch applicants to review another packet.";
       return;
     }
     objectUrls.splice(0).forEach((url) => URL.revokeObjectURL(url));
