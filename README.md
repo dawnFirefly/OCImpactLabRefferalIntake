@@ -72,9 +72,19 @@ Use **Continue to summary** to demonstrate the flow. There is no automatic analy
 | `POST /api/applicants` | Multipart `name` + `file`; stores the PDF |
 | `GET /api/applicants/:id/pdf` | Stream the stored PDF to the processor preview |
 | `PATCH /api/applicants/:id` | Update intake details or review status (JSON) |
-| `DELETE /api/applicants/:id` | Delete (local) or move to Drive trash |
+| `DELETE /api/applicants/:id` | Delete (local/R2) or move to Drive trash |
 
-**Default: local disk.** With no configuration, PDFs and an `index.json` go to `frontend/.data/referrals/` (Git-ignored). This needs no setup but only lives on the machine running the server.
+**On Cloudflare (the deployed site): R2.** `nuxt.config.ts` declares the R2 bucket `referralready` as the binding `REFERRAL_PACKETS`; Cloudflare's build turns that into the deployed Worker config, so no dashboard binding is needed. PDFs are stored at `packets/<id>.pdf` and applicant details in a single `index.json`. Uploads are refused once stored PDFs would exceed `NUXT_STORAGE_LIMIT_GB` (default 9 GB, under R2's 10 GB free tier). Protect the site with Cloudflare Access before storing real referrals: these routes have no login of their own.
+
+To test the Cloudflare build locally with a simulated bucket:
+
+```sh
+cd frontend
+WORKERS_CI=1 NITRO_PRESET=cloudflare_module npx nuxt build
+npx wrangler dev -c .output/server/wrangler.json
+```
+
+**Local development default: local disk.** With no configuration, PDFs and an `index.json` go to `frontend/.data/referrals/` (Git-ignored). This needs no setup but only lives on the machine running the server.
 
 **Optional: Google Drive.** Copy `frontend/.env.example` to `frontend/.env` and fill in all four values; the server then stores and lists packets in one Drive folder (applicant metadata is kept in each file's `appProperties`), so everyone using that server sees the same list.
 

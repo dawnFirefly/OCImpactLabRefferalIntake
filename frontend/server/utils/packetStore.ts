@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { H3Event } from "h3";
 
 export const REVIEW_STATUSES = ["new", "in_review", "needs_info", "approved", "denied"] as const;
 export const PRIORITIES = ["routine", "urgent"] as const;
@@ -23,14 +24,15 @@ export type StoredPacket = IntakeFields & {
   fileName: string;
   size: number;
   uploadedAt: string;
-  storage: "local" | "google_drive";
+  storage: "local" | "google_drive" | "r2";
 };
 
 type PacketStore = {
   list(): Promise<StoredPacket[]>;
   save(meta: Omit<StoredPacket, "id" | "storage">, bytes: Buffer): Promise<StoredPacket>;
   update(id: string, fields: Partial<IntakeFields>): Promise<StoredPacket | null>;
-  read(id: string): Promise<Buffer | null>;
+  /** PDF bytes, or a stream for stores that support it (R2). */
+  read(id: string): Promise<Buffer | ReadableStream | null>;
   remove(id: string): Promise<boolean>;
 };
 
@@ -269,11 +271,96 @@ function driveStore(config: DriveConfig): PacketStore {
   };
 }
 
-let store: PacketStore | null = null;
-export function usePacketStore(): PacketStore {
-  if (store) return store;
-  const config = useRuntimeConfig().googleDrive as DriveConfig;
-  const driveReady = config.clientId && config.clientSecret && config.refreshToken && config.folderId;
-  store = driveReady ? driveStore(config) : localStore();
-  return store;
+/** Minimal slice of the Cloudflare R2 binding API used here. */
+type R2Bucket = {
+  get(key: string): Promise<{ body: ReadableStream; text(): Promise<string>; etag: string } | null>;
+  put(key: string, value: string | ArrayBuffer | ArrayBufferView, options?: {
+    httpMetadata?: { contentType?: string };
+    onlyIf?: { etagMatches?: string; etagDoesNotMatch?: string };
+  }): Promise<unknown | null>;
+  delete(key: string): Promise<void>;
+};
+
+/**
+ * Cloudflare R2 store: PDFs at `packets/<id>.pdf`, applicant details in one `index.json`
+ * (one cheap read per dashboard load instead of a bucket listing).
+ */
+function r2Store(bucket: R2Bucket): PacketStore {
+  const INDEX = "index.json";
+  const fileKey = (id: string) => `packets/${id}.pdf`;
+  const safeId = (id: string) => /^[0-9a-f-]{36}$/.test(id);
+  async function load() {
+    const object = await bucket.get(INDEX);
+    if (!object) return { entries: [] as StoredPacket[], etag: null as string | null };
+    return { entries: (JSON.parse(await object.text()) as StoredPacket[]).map(normalize), etag: object.etag };
+  }
+  /** Read-modify-write with an etag check, retrying if another request changed the index first. */
+  async function change<T>(fn: (entries: StoredPacket[]) => T) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { entries, etag } = await load();
+      const result = fn(entries);
+      const written = await bucket.put(INDEX, JSON.stringify(entries), {
+        httpMetadata: { contentType: "application/json" },
+        // The very first write (no index yet) is unconditional.
+        ...(etag ? { onlyIf: { etagMatches: etag } } : {}),
+      });
+      if (written) return result;
+    }
+    throw new Error("R2 index is busy; try again.");
+  }
+  return {
+    async list() {
+      return (await load()).entries;
+    },
+    async save(meta, bytes) {
+      const packet: StoredPacket = { ...meta, id: randomUUID(), storage: "r2" };
+      await bucket.put(fileKey(packet.id), bytes, { httpMetadata: { contentType: "application/pdf" } });
+      await change((entries) => entries.push(packet));
+      return packet;
+    },
+    async update(id, fields) {
+      return change((entries) => {
+        const index = entries.findIndex((e) => e.id === id);
+        if (index === -1) return null;
+        entries[index] = { ...entries[index]!, ...fields };
+        return entries[index]!;
+      });
+    },
+    async read(id) {
+      if (!safeId(id)) return null;
+      return (await bucket.get(fileKey(id)))?.body ?? null;
+    },
+    async remove(id) {
+      if (!safeId(id)) return false;
+      const removed = await change((entries) => {
+        const index = entries.findIndex((e) => e.id === id);
+        if (index !== -1) entries.splice(index, 1);
+        return index !== -1;
+      });
+      if (removed) await bucket.delete(fileKey(id));
+      return removed;
+    },
+  };
+}
+
+let driveSingleton: PacketStore | null = null;
+let localSingleton: PacketStore | null = null;
+/**
+ * Picks the store for this request: the Cloudflare R2 binding `REFERRAL_PACKETS` when deployed,
+ * else Google Drive when `NUXT_GOOGLE_DRIVE_*` is set, else local disk.
+ */
+export function usePacketStore(event: H3Event): PacketStore {
+  const bucket = (event.context.cloudflare?.env as Record<string, unknown> | undefined)?.REFERRAL_PACKETS;
+  if (bucket) return r2Store(bucket as R2Bucket);
+  const config = useRuntimeConfig(event).googleDrive as DriveConfig;
+  if (config.clientId && config.clientSecret && config.refreshToken && config.folderId) {
+    return (driveSingleton ??= driveStore(config));
+  }
+  return (localSingleton ??= localStore());
+}
+
+/** Storage cap (default 9 GB, below R2's 10 GB free tier); set NUXT_STORAGE_LIMIT_GB to change. */
+export function storageLimitBytes(event: H3Event) {
+  const gb = Number(useRuntimeConfig(event).storageLimitGb);
+  return (Number.isFinite(gb) && gb > 0 ? gb : 9) * 1024 ** 3;
 }

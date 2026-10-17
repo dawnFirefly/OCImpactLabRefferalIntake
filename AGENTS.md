@@ -27,7 +27,7 @@ Before delivery: `npm run typecheck` and `npm run build` from `frontend/`. For U
 - `frontend/app/app.vue`: root session provider and Nuxt router outlet.
 - `frontend/app/layouts/default.vue`: lightweight shared navigation.
 - `frontend/app/pages/index.vue`: applicant dashboard; creates applicants by uploading one PDF to the server.
-- `frontend/server/`: `/api/applicants` routes and `utils/packetStore.ts` (local disk in `.data/referrals`, or Google Drive when `NUXT_GOOGLE_DRIVE_*` is set). See README "Packet storage".
+- `frontend/server/`: `/api/applicants` routes and `utils/packetStore.ts` (Cloudflare R2 bucket `referralready` when deployed; otherwise Google Drive when `NUXT_GOOGLE_DRIVE_*` is set, else local disk in `.data/referrals`). See README "Packet storage".
 - `frontend/app/pages/processor.vue`: processor route and summary continuation.
 - `frontend/app/components/DecisionProcessor.vue`: existing three panels, graph, checklist, review dialog, browser PDF preview.
 - `frontend/app/pages/summary.vue`: placeholder sections only; no decision generation.

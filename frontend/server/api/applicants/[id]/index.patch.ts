@@ -2,7 +2,7 @@
 export default defineEventHandler(async (event) => {
   const body = await readBody<Record<string, unknown>>(event);
   if (!body || typeof body !== "object") throw createError({ statusCode: 400, statusMessage: "Expected a JSON body." });
-  const updated = await usePacketStore().update(getRouterParam(event, "id") || "", parseIntake(body, true));
+  const updated = await usePacketStore(event).update(getRouterParam(event, "id") || "", parseIntake(body, true));
   if (!updated) throw createError({ statusCode: 404, statusMessage: "Applicant not found." });
   return updated;
 });

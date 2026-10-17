@@ -224,6 +224,7 @@ frontend/node_modules/
 frontend/.nuxt/
 frontend/.output/
 frontend/.data/
+frontend/.wrangler/
 
 # Local referral files and secrets
 *.pdf

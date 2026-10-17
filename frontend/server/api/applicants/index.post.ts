@@ -17,9 +17,20 @@ export default defineEventHandler(async (event) => {
   if (file.data.length > MAX_PACKET_BYTES) {
     throw createError({ statusCode: 413, statusMessage: "PDF must be 50 MB or smaller." });
   }
+  const store = usePacketStore(event);
+  const limit = storageLimitBytes(event);
+  const used = (await store.list()).reduce((sum, p) => sum + (p.size || 0), 0);
+  if (used + file.data.length > limit) {
+    const size = (bytes: number) =>
+      limit >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+    throw createError({
+      statusCode: 507,
+      statusMessage: `Storage is full (${size(used)} of ${size(limit)} used). Delete old referrals to upload more.`,
+    });
+  }
   const uploadedAt = new Date().toISOString();
   try {
-    return await usePacketStore().save(
+    return await store.save(
       {
         source: "", contact: "", reviewer: "", notes: "", priority: "routine", reviewStatus: "new",
         ...intake,

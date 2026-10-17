@@ -1,3 +1,3 @@
-export default defineEventHandler(async () => {
-  return await usePacketStore().list();
+export default defineEventHandler(async (event) => {
+  return await usePacketStore(event).list();
 });

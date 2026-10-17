@@ -1,5 +1,5 @@
 export default defineEventHandler(async (event) => {
-  const bytes = await usePacketStore().read(getRouterParam(event, "id") || "");
+  const bytes = await usePacketStore(event).read(getRouterParam(event, "id") || "");
   if (!bytes) throw createError({ statusCode: 404, statusMessage: "PDF not found." });
   setResponseHeaders(event, {
     "Content-Type": "application/pdf",
