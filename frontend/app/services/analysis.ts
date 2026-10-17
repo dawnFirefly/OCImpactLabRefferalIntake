@@ -1,5 +1,5 @@
 import type { DocumentSection, Evidence, Fact, Referral, Rule } from "../types";
-import { maxInlineAnalysisBytes } from "#shared/upload-limits";
+import { maxPacketBytes } from "#shared/upload-limits";
 
 export type AnalysisProgress = { stage: "uploading" | "extracting" | "reviewing"; message: string };
 
@@ -27,7 +27,7 @@ type StreamEvent =
 /** Reads the server's newline-delimited event stream; only a final `result` is authoritative. */
 export const claudeProvider: AnalysisProvider = {
   async analyze(file, patientName, { onProgress, onPreview }, signal) {
-    if (file.size > maxInlineAnalysisBytes) throw new Error("This PDF can be saved to private storage (up to 50 MB). Inline Claude analysis currently supports PDFs up to 20 MB.");
+    if (file.size > maxPacketBytes) throw new Error("Choose a PDF up to 50 MB.");
     const body = new FormData();
     body.append("pdf", file);
     if (patientName.trim()) body.append("patientName", patientName.trim());

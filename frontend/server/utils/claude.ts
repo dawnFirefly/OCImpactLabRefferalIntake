@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { toFile } from "@anthropic-ai/sdk";
 import { outputSchema } from "./analysis-contract.ts";
 import type { z } from "zod";
 
@@ -14,6 +14,28 @@ export type ClaudeRequest = {
   /** Structured-output text as it streams. `onRestart` fires when a new text block begins (e.g. after a fallback). */
   onText?: (delta: string) => void; onRestart?: () => void;
 };
+
+/**
+ * Upload the original PDF once through the Files API (500 MB limit) instead of inlining base64,
+ * which is capped by the 32 MB request size. Returns the file ID to reference in both passes.
+ */
+export async function uploadPdf(apiKey: string, data: Uint8Array, filename: string, signal?: AbortSignal, transport?: typeof fetch): Promise<string> {
+  const client = new Anthropic({ apiKey, maxRetries: 2, ...(transport ? { fetch: transport } : {}) });
+  try {
+    const file = await client.files.upload({ file: await toFile(data, filename, { type: "application/pdf" }) }, { signal });
+    return file.id;
+  } catch (error) {
+    if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError)
+      throw new AnalysisFailure(503, "Claude credentials were rejected. Check the server environment key.");
+    if (error instanceof Anthropic.RateLimitError) throw new AnalysisFailure(429, "Claude is rate limited or out of credits. Try again later.");
+    throw new AnalysisFailure(502, "The PDF could not be sent to Claude. Check its size (up to 50 MB) and try again.");
+  }
+}
+/** Best-effort removal of the uploaded PDF after analysis; failures are not surfaced. */
+export async function deletePdf(apiKey: string, fileId: string, transport?: typeof fetch) {
+  const client = new Anthropic({ apiKey, maxRetries: 1, ...(transport ? { fetch: transport } : {}) });
+  await client.files.delete(fileId).catch(() => {});
+}
 
 /** One streamed structured-output request. Streaming avoids HTTP timeouts on long scanned packets. */
 export async function callClaude({ apiKey, model, effort = "high", schema, system, content, signal, transport, onText, onRestart }: ClaudeRequest): Promise<unknown> {

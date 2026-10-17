@@ -3,6 +3,8 @@
   "name": "ocimpactlabrefferalintake",
   "account_id": "bb6d78df57f6062338cc78cd9d01500a",
   "main": ".output/server/index.mjs",
+  // `wrangler deploy` (Workers Builds deploy command) builds the Nuxt Worker first, so .output exists.
+  "build": { "command": "npm run build:worker" },
   "compatibility_date": "2026-10-17",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {

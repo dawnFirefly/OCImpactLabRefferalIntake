@@ -358,7 +358,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", drawOutputs));
             :disabled="analyzing"
             @change="upload(($event.target as HTMLInputElement).files)"
           /><Upload :size="20" /><strong>{{ referral.documents.length && mode === 'attached' ? 'Upload another applicant PDF' : 'Upload applicant PDF' }}</strong>
-          <span class="tiny muted">Drop or choose one combined PDF (≤ 50 MB). Inline Claude analysis supports PDFs up to 20 MB.</span></label
+          <span class="tiny muted">Drop or choose one combined PDF (≤ 50 MB). Claude analysis starts right away.</span></label
         >
         <div v-if="analyzing" class="analysis-controls" role="status" aria-live="polite">
           <p class="tiny analysis-progress"><span class="status-dot busy" />{{ progress?.message || "Starting analysis…" }}</p>

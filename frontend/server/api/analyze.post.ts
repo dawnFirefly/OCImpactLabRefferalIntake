@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { extractionSchema, evaluationSchema, sectionSchema, factSchema, flattenFact, catalog, validateExtraction, validateEvaluation, toReferral, criteriaText, documentId } from "../utils/analysis-contract";
 import { TopLevelArrayItems } from "../utils/stream-json";
-import { callClaude, AnalysisFailure } from "../utils/claude";
+import { callClaude, uploadPdf, deletePdf, AnalysisFailure } from "../utils/claude";
 import { extractionPrompt, evaluationPrompt } from "../utils/prompts";
 import { anthropicKey } from "../utils/credentials";
 import { requireWorkspace } from "../utils/workspace-access";
-import { maxInlineAnalysisBytes } from "../../shared/upload-limits";
+import { maxPacketBytes } from "../../shared/upload-limits";
 
 let busy = false;
 
@@ -14,7 +14,9 @@ function validationReason(error: unknown) {
   if (error instanceof z.ZodError) return `schema: ${[...new Set(error.issues.map(i => `${i.path.filter(p => typeof p === "string").join(".")} ${i.code}`))].slice(0, 3).join("; ")}`;
   return error instanceof Error && /^[A-Za-z ]{3,60}$/.test(error.message) ? error.message : "unknown";
 }
-const maxBytes = maxInlineAnalysisBytes;
+const maxBytes = maxPacketBytes;
+/** Raw size sent inline (base64 stays under the 32 MB request limit); larger PDFs use the Files API. */
+const inlinePdfBytes = 20 * 1024 * 1024;
 
 /**
  * Streams newline-delimited JSON: progress, provisional `section`/`fact`/`criteria`/`rule`
@@ -26,7 +28,7 @@ export default defineEventHandler(async event => {
   const config = useRuntimeConfig(event);
   await requireWorkspace(event, config);
   const length = Number(getHeader(event, "content-length"));
-  if (!Number.isFinite(length) || length <= 0 || length > maxBytes + 65536) throw createError({ statusCode: 413, statusMessage: "Choose one PDF up to 20 MB." });
+  if (!Number.isFinite(length) || length <= 0 || length > maxBytes + 65536) throw createError({ statusCode: 413, statusMessage: "Choose one PDF up to 50 MB." });
   const apiKey = anthropicKey(config, event.context.cloudflare?.env);
   if (!apiKey) throw createError({ statusCode: 503, statusMessage: "Claude is not configured. Set the server-only NUXT_ANTHROPIC_API_KEY secret." });
   if (busy) throw createError({ statusCode: 429, statusMessage: "Another analysis is running. Please wait and try again." });
@@ -38,7 +40,7 @@ export default defineEventHandler(async event => {
   // Optional: without a name, Claude reads the patient's name from the PDF and identity is not cross-checked.
   if (nameParts.length > 1 || patientName.length > 200) throw createError({ statusCode: 400, statusMessage: "The patient's name must be up to 200 characters." });
   if (files.length !== 1 || !file || file.name !== "pdf" || !file.filename?.toLowerCase().endsWith(".pdf") || !file.data.length || file.data.length > maxBytes || !file.data.subarray(0, 1024).includes(Buffer.from("%PDF-"))) {
-    throw createError({ statusCode: 400, statusMessage: "Choose exactly one valid combined PDF up to 20 MB." });
+    throw createError({ statusCode: 400, statusMessage: "Choose exactly one valid combined PDF up to 50 MB." });
   }
   busy = true;
   // Stop paying for Claude work when the coordinator cancels or closes the tab.
@@ -49,7 +51,16 @@ export default defineEventHandler(async event => {
   return new ReadableStream({
     async start(controller) {
       const send = (payload: unknown) => controller.enqueue(new TextEncoder().encode(`${JSON.stringify(payload)}\n`));
+      let uploadedFileId: string | null = null;
       try {
+        // Inline base64 grows ~4/3 and the Messages request is capped at 32 MB: larger PDFs go via the Files API.
+        let pdfSource: { type: "base64"; media_type: "application/pdf"; data: string } | { type: "file"; file_id: string };
+        if (file.data.length <= inlinePdfBytes) pdfSource = { type: "base64", media_type: "application/pdf", data: file.data.toString("base64") };
+        else {
+          send({ type: "progress", stage: "uploading", message: "Uploading the large PDF to Claude…" });
+          uploadedFileId = await uploadPdf(apiKey, new Uint8Array(file.data), file.filename!, abort.signal);
+          pdfSource = { type: "file", file_id: uploadedFileId };
+        }
         send({ type: "progress", stage: "extracting", message: "Pass 1 of 2 · Claude Haiku is reading the PDF, finding forms, facts and their positions." });
         // Preview items are shape-checked only; cross-references are validated on the complete result.
         let preview = new TopLevelArrayItems(onExtractionItem);
@@ -68,7 +79,7 @@ export default defineEventHandler(async event => {
         const restart = (stage: string) => () => { preview = new TopLevelArrayItems(stage === "extracting" ? onExtractionItem : onRuleItem); send({ type: "reset", stage }); };
         const extracted = await callClaude({ apiKey, model: extractionModel, effort: "medium", schema: extractionSchema, system: extractionPrompt, signal: abort.signal,
           onText: (delta) => preview.push(delta), onRestart: restart("extracting"), content: [
-          { type: "document", source: { type: "base64", media_type: "application/pdf", data: file.data.toString("base64") } },
+          { type: "document", source: pdfSource },
           { type: "text", text: JSON.stringify(patientName ? { patient_name_to_match: patientName }
             : { patient_name_to_match: null, instruction: "No name was provided. Extract the patient's name from the packet; report identity_match as uncertain." }) },
         ] });
@@ -92,6 +103,7 @@ export default defineEventHandler(async event => {
           : `The analysis did not pass evidence validation (${validationReason(error)}). No result was applied. Please retry or review the PDF manually.` });
       } finally {
         busy = false;
+        if (uploadedFileId) await deletePdf(apiKey, uploadedFileId);
         try { controller.close(); } catch { /* client already disconnected */ }
       }
     },
