@@ -133,7 +133,7 @@ export function validateEvaluation(input: unknown, extraction: Extraction): Rule
   return catalog.map(source => {
     const assessed = byId.get(source.id);
     if (!assessed) tally(extraction.repairs, "criterion without assessment marked uncertain");
-    const result = assessed || { id: source.id, status: "uncertain" as const, fact_ids: [], note: "Claude did not return an assessment for this criterion. Review it manually." };
+    const result = assessed || { id: source.id, status: "uncertain" as const, fact_ids: [], note: "The model did not return an assessment for this criterion. Review it manually." };
     const fact_ids = result.fact_ids.filter(id => facts.has(id));
     if (fact_ids.length !== result.fact_ids.length) tally(extraction.repairs, "unknown fact link dropped");
     let status: Rule["status"] = result.status;
@@ -143,7 +143,7 @@ export function validateEvaluation(input: unknown, extraction: Extraction): Rule
       (!supporting.length || supporting.some(f => f.status !== "found" || !f.evidence_ids.length))) status = "uncertain";
     if (source.superseded_by) status = "not_applicable";
     // Human-review rules are routed by the decision tree (uncertain/not met → human review), never auto-denied.
-    const note = result.note.trim() || "Claude returned no rationale for this assessment. Review it manually.";
+    const note = result.note.trim() || "The model returned no rationale for this assessment. Review it manually.";
     return { ...source, ...result, note, fact_ids, status, human_review: source.human_review || false };
   });
 }

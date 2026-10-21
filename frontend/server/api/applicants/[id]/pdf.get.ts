@@ -21,7 +21,7 @@ export default defineEventHandler(async (event) => {
     "Content-Type": "application/pdf",
     "Content-Disposition": "inline",
     "Accept-Ranges": "bytes",
-    "Cache-Control": "private, max-age=86400",
+    "Cache-Control": "private, no-store",
   });
   const range = parseRange(getHeader(event, "range"), packet.size);
   if (range === "unsatisfiable") {

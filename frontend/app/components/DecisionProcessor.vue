@@ -31,6 +31,7 @@ import { evaluateTree, outcomeLabels, ruleStep, type TreeStep, type StepOutcome 
 
 const {
   referral,
+  saveState, saveError, retrySave, saveLayout,
   analyzing,
   savingPdf,
   savePdf,
@@ -175,7 +176,7 @@ const visibleFacts = computed(() =>
   filteredFacts.value.slice(graphPage.value * 5, graphPage.value * 5 + 5),
 );
 const visibleSections = computed(() => (referral.value.sections || []).filter(s =>
-  // While Claude is still listing forms (no facts yet), show every form as it arrives.
+  // While AI is still listing forms (no facts yet), show every form as it arrives.
   (live.value && !visibleFacts.value.length) ||
   visibleFacts.value.some(f => f.section_ids?.includes(s.id)) || (s.status === "missing" && group.value === "All factors" && graphPage.value === 0)));
 // Follow the newest streamed facts so new nodes appear in view.
@@ -196,7 +197,7 @@ const graphNodes = computed<Node[]>(() => {
     ...docs.map((d, i) => ({ id: d.id, type: "document", position: { x: 0, y: 90 + i * 190 }, data: d })),
     ...visibleSections.value.map((section, i) => ({ id: section.id, type: "section", position: { x: 185, y: 30 + i * 150 }, data: section })),
     ...visibleFacts.value.map((f, i) => ({ id: f.id, type: "fact", position: { x: hasSections ? 420 : 235, y: 20 + i * 135 }, data: f })),
-  ];
+  ].map(node => ({ ...node, position: referral.value.graphLayout?.positions[node.id] || node.position }));
 });
 const graphEdges = computed<Edge[]>(() => [
   ...visibleSections.value.map(section => ({ id: `${section.document_id}-${section.id}`, source: section.document_id, target: section.id,
@@ -222,7 +223,7 @@ const treeView = computed(() => referral.value.checklist.rules.length > 0 && ref
 const rulesById = computed(() => new Map(referral.value.checklist.rules.map((r) => [r.id, r])));
 const tree = computed(() => evaluateTree(referral.value.checklist.rules));
 function stepLabel(step: TreeStep, outcome: StepOutcome) {
-  return ({ pass: "Pass", fail: step.failLabel, unresolved: "Needs review", not_reviewed: live.value ? "Waiting for Claude" : "Not reviewed",
+  return ({ pass: "Pass", fail: step.failLabel, unresolved: "Needs review", not_reviewed: live.value ? "Waiting for AI" : "Not reviewed",
     info: step.gate === "context" ? "Context" : "Information", manual: "Coordinator check" } as Record<StepOutcome, string>)[outcome];
 }
 function rulesOf(step: TreeStep) { return step.rule_ids.map((id) => rulesById.value.get(id)).filter(Boolean) as Rule[]; }
@@ -241,7 +242,7 @@ function ruleValue(rule: Rule) {
 }
 function ruleDetail(rule: Rule) {
   const labels: Record<string, string> = {
-    pending: "Waiting for Claude…",
+    pending: "Waiting for AI…",
     not_reviewed: "Not yet reviewed",
     unknown: isPacketMock.value ? "Not evaluated" : "Not found",
     concern: "Needs clarification",
@@ -387,6 +388,16 @@ watch([group, selectedDoc], () => {
 });
 // Wait for Vue Flow to measure new cards before moving the camera.
 let pendingFocusNode: string | undefined;
+let restoreViewportPending = true;
+function saveGraphPosition({ node }: { node: Node }) {
+  const positions = { ...(referral.value.graphLayout?.positions || {}), [node.id]: { x: node.position.x, y: node.position.y } };
+  saveLayout({ positions, viewport: getViewport() });
+  drawOutputs();
+}
+function saveGraphViewport() {
+  if (!followingNodes.value && !restoreViewportPending && referral.value.status !== "analyzing") saveLayout({ positions: referral.value.graphLayout?.positions || {}, viewport: getViewport() });
+  drawOutputs();
+}
 function pauseFollowing() {
   followingNodes.value = false;
   // Interrupt an in-flight camera transition at its current position.
@@ -408,6 +419,13 @@ function resumeFollowing() {
   frameInitializedNodes();
 }
 function frameInitializedNodes() {
+  if (restoreViewportPending && referral.value.graphLayout?.viewport) {
+    restoreViewportPending = false;
+    followingNodes.value = false;
+    setViewport(referral.value.graphLayout.viewport, { duration: 0 });
+    return;
+  }
+  restoreViewportPending = false;
   if (!followingNodes.value) return;
   if (pendingFocusNode) {
     const id = pendingFocusNode;
@@ -428,7 +446,7 @@ watch(
   },
   { flush: "pre" },
 );
-watch(() => referral.value.id, () => { followingNodes.value = true; selectedFact.value = null; selectedDoc.value = null; review.value = null; group.value = "All factors"; graphPage.value = 0; });
+watch(() => referral.value.id, () => { restoreViewportPending = true; followingNodes.value = !referral.value.graphLayout?.viewport; selectedFact.value = null; selectedDoc.value = null; review.value = null; group.value = "All factors"; graphPage.value = 0; });
 // Reopening/closing the review resizes the graph column; refit once the grid transition settles.
 watch(() => review.value === null, () => setTimeout(() => { if (followingNodes.value) fitView({ padding: 0.22, maxZoom: 1, duration: 150 }); drawOutputs(); }, 220));
 watch(() => referral.value.checklist.rules.map(r => r.status).join(","), () => nextTick(drawOutputs));
@@ -443,8 +461,9 @@ function refitIfFollowing(duration = 0) {
 // A saved analysis replaces the empty stored record under the same applicant ID: show it framed.
 watch(() => referral.value, (now, before) => {
   if (before && now !== before && now.id === before.id && now.status === "analyzed" && before.status !== "analyzing") {
-    followingNodes.value = true;
-    setTimeout(() => refitIfFollowing(), 250);
+    restoreViewportPending = true;
+    followingNodes.value = !now.graphLayout?.viewport;
+    setTimeout(frameInitializedNodes, 250);
   }
 });
 onMounted(() => {
@@ -463,6 +482,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <div v-if="referral.intake || saveState || saveError" class="flex flex-wrap items-center gap-3 px-5 py-2 text-sm" role="status">
+    <strong v-if="referral.intake">{{ referral.title }}</strong>
+    <span>{{ saveError || (saveState === 'saving' ? 'Saving review…' : saveState === 'saved' ? 'Review saved to this applicant' : '') }}</span>
+    <Button v-if="saveError" size="sm" variant="outline" @click="retrySave">Retry save</Button>
+  </div>
   <div v-if="closedPanels.length" class="panel-restore" aria-label="Reopen panels">
     <span>Reopen:</span>
     <Button v-for="id in closedPanels" :key="id" variant="outline" size="sm" @click="reopenPanel(id)">{{ panelLabels[id] }}</Button>
@@ -499,7 +523,7 @@ onBeforeUnmount(() => {
       <div class="scroll-body">
         <label
           class="upload-area upload-primary"
-          :class="{ dragging, disabled: analyzing }"
+          :class="{ dragging, disabled: analyzing || savingPdf }"
           @dragover.prevent="dragging = true"
           @dragleave="dragging = false"
           @drop.prevent="onDrop"
@@ -508,10 +532,10 @@ onBeforeUnmount(() => {
             type="file"
             accept="application/pdf,.pdf"
             class="sr-only"
-            :disabled="analyzing"
+            :disabled="analyzing || savingPdf"
             @change="upload(($event.target as HTMLInputElement).files)"
           /><Upload :size="20" /><strong>{{ referral.documents.length && mode === 'attached' ? 'Upload another applicant PDF' : 'Upload applicant PDF' }}</strong>
-          <span class="tiny muted">Drop or choose one combined PDF (≤ 50 MB). Claude analysis starts right away.</span></label
+          <span class="tiny muted">Drop or choose one combined PDF (≤ 50 MB). AI analysis starts right away.</span></label
         >
         <div v-if="analyzing" class="analysis-controls" role="status" aria-live="polite">
           <p class="tiny analysis-progress"><span class="status-dot busy" />{{ progress?.message || "Starting analysis…" }}</p>
@@ -519,7 +543,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="mode === 'provided'" class="review-field" style="padding: 12px 20px 0">
           <label for="applicant">Or review a provided packet</label>
-          <select id="applicant" class="evidence-select" :value="referral.id" :disabled="analyzing" @change="switchApplicant">
+          <select id="applicant" class="evidence-select" :value="referral.id" :disabled="analyzing || savingPdf" @change="switchApplicant">
             <option v-for="doc in providedDocuments" :key="doc.id" :value="doc.id">{{ doc.name.replace('.pdf', '') }} · separate applicant</option>
           </select>
         </div>
@@ -537,8 +561,8 @@ onBeforeUnmount(() => {
                 <span class="file-name">{{ doc.name }}</span>
                 <div class="file-meta">
                   {{
-                    live ? "Claude is reading…" : doc.page_count
-                      ? `${doc.page_count} pages · ${doc.status === "analyzed" ? "Claude reviewed" : doc.status === "provided_demo" ? "provided packet" : "example"}`
+                    live ? "AI is reading…" : doc.page_count
+                      ? `${doc.page_count} pages · ${doc.status === "analyzed" ? "AI reviewed" : doc.status === "provided_demo" ? "provided packet" : "example"}`
                       : doc.status === "stored" ? "Stored on server · not analyzed" : "Uploaded · not analyzed"
                   }}
                 </div>
@@ -547,12 +571,12 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div v-if="backgroundIds.has(referral.id)" class="local-label" role="status">
-          <span class="status-dot busy" />Claude is analyzing this packet in the background. Results appear here when it finishes and are saved with the applicant.
+          <span class="status-dot busy" />AI is analyzing this packet in the background. Results appear here when it finishes and are saved with the applicant.
         </div>
         <div v-else-if="mode !== 'synthetic' && referral.documents.length && !analyzing" class="source-actions">
           <!-- Provided and dashboard-stored packets never auto-analyze; processor uploads do. Retry is always explicit. -->
           <Button v-if="mode === 'provided' || error || referral.status === 'analyzed' || referral.documents[0]?.status === 'stored'" size="sm" :variant="referral.status === 'analyzed' ? 'outline' : 'default'" :disabled="savingPdf" @click="analyze">
-            {{ referral.status === 'analyzed' ? 'Analyze again' : error ? 'Retry analysis' : 'Analyze with Claude' }}
+            {{ referral.status === 'analyzed' ? 'Analyze again' : error ? 'Retry analysis' : 'Analyze with AI' }}
           </Button>
           <!-- Dashboard applicants are already stored by /api/applicants. -->
           <Button v-if="referral.documents[0]?.status !== 'stored' && !referral.intake" size="sm" variant="ghost" :disabled="savingPdf || !!referral.documents[0]?.storage" @click="savePdf">{{ savingPdf ? 'Saving PDF…' : referral.documents[0]?.storage ? 'PDF saved privately' : 'Save PDF to private storage' }}</Button>
@@ -564,12 +588,12 @@ onBeforeUnmount(() => {
         <span>{{
           referral.status === "awaiting_pdf"
             ? "Needs PDF"
-            : live ? "Analyzing with Claude"
+            : live ? "Analyzing with AI"
             : mode === "provided"
             ? "Provided PDFs"
             : awaitingClaude
               ? "Ready for analysis"
-              : referral.status === "analyzed" ? "Claude analysis" : mode === "synthetic" ? "Synthetic flow" : "Attached PDF"
+              : referral.status === "analyzed" ? "AI analysis" : mode === "synthetic" ? "Synthetic flow" : "Attached PDF"
         }}</span>
         <button v-if="mode !== 'synthetic'" @click="demo">
           Synthetic flow
@@ -651,11 +675,12 @@ onBeforeUnmount(() => {
             fit-view-on-init
             @move-start="pauseForGraphGesture"
             @move="drawOutputs"
-            @move-end="drawOutputs"
+            @move-end="saveGraphViewport"
             @nodes-initialized="frameInitializedNodes"
             @node-click="pauseFollowing"
             @node-drag-start="pauseFollowing"
             @node-drag="drawOutputs"
+            @node-drag-stop="saveGraphPosition"
           >
             <Background :gap="18" :size="0.6" pattern-color="#cbd7c0" />
             <template #node-document="{ data }"
@@ -669,7 +694,7 @@ onBeforeUnmount(() => {
                   />{{ data.name }}
                 </div>
                 <div class="node-meta">
-                  {{ data.page_count || "—" }} pages · {{ data.status === "analyzed" ? "Claude" : live ? "Claude reading…" : "source" }}
+                  {{ data.page_count || "—" }} pages · {{ data.status === "analyzed" ? "AI" : live ? "AI reading…" : "source" }}
                 </div>
               </div></template
             >
@@ -723,7 +748,7 @@ onBeforeUnmount(() => {
               referral.status === "awaiting_pdf"
                 ? "Attach one combined PDF to begin this applicant’s review."
                 : awaitingClaude
-                  ? "Enter a patient name and choose Analyze with Claude."
+                  ? "Enter a patient name and choose Analyze with AI."
                   : "No nodes in this selection."
             }}
           </p>
@@ -773,7 +798,7 @@ onBeforeUnmount(() => {
       <div class="scroll-body" @scroll="drawOutputs">
         <div v-if="referral.recommendation" class="recommendation" :class="referral.recommendation.status" role="status">
           <strong>{{ recommendationLabel }}</strong>
-          <p>Claude recommendation · coordinator confirms the final decision.</p>
+          <p>AI recommendation · coordinator confirms the final decision.</p>
           <details><summary>Decision path · {{ referral.recommendation.rule_ids.length }} linked criteria</summary>
             <p v-for="(reason, i) in referral.recommendation.reasons" :key="i">{{ reason }}</p>
           </details>
@@ -786,8 +811,8 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="live" class="intro-label live-label" role="status">
           <span class="status-dot busy" />{{ referral.checklist.rules.length
-            ? `Claude is reviewing criteria · ${referral.checklist.rules.filter(r => r.status !== 'pending').length} / ${referral.checklist.rules.length}`
-            : "Requirements are reviewed after Claude finishes reading forms and facts." }}
+            ? `AI is reviewing criteria · ${referral.checklist.rules.filter(r => r.status !== 'pending').length} / ${referral.checklist.rules.length}`
+            : "Requirements are reviewed after AI finishes reading forms and facts." }}
           Provisional until the full result passes validation.
         </div>
         <template v-if="treeView">
@@ -800,7 +825,7 @@ onBeforeUnmount(() => {
               <ChevronRight v-if="collapsed.has(s.stage.id)" :size="12" class="muted" /><ChevronDown v-else :size="12" class="muted" />
               <span class="stage-number mono">{{ s.stage.number }}</span>
               <span class="group-title">{{ s.stage.title }}</span>
-              <span class="stage-badge" :class="s.outcome">{{ s.outcome === "not_reviewed" && live ? "Waiting for Claude" : outcomeLabels[s.outcome] }}</span>
+              <span class="stage-badge" :class="s.outcome">{{ s.outcome === "not_reviewed" && live ? "Waiting for AI" : outcomeLabels[s.outcome] }}</span>
             </button>
             <div v-if="!collapsed.has(s.stage.id)" class="stage-body">
               <p class="stage-summary">{{ s.stage.summary }}</p>
@@ -858,7 +883,7 @@ onBeforeUnmount(() => {
         <span>{{ treeView ? "IHH decision tree · 6 stages" : "Linked to sources" }}</span><span>{{ referral.status === "analyzed" ? "Coordinator review" : treeView ? `${referral.checklist.rules.length} criteria` : "Example checklist" }}</span>
       </footer>
     </section>
-    <SourceReviewPanel :style="windowStyle('source-review')" data-panel="source-review" v-if="review" :target="review" @close="closeReview" @select="openReview" />
+    <SourceReviewPanel :style="windowStyle('source-review')" data-panel="source-review" v-if="review" :key="`${referral.id}:${review.kind}:${review.id}`" :target="review" @close="closeReview" @select="openReview" />
   </main>
 </template>
 <style scoped>

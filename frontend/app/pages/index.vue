@@ -20,7 +20,7 @@ import { outcomeLabels } from "#shared/decision-tree";
 
 const { applicants, selectApplicant, loadStoredApplicants, updateStoredApplicant, deleteStoredApplicant, analyzeInBackground, backgroundIds, backgroundErrors } =
   inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
-useHead({ title: "Applicants · ReferralReady" });
+useHead({ title: "Applicants · Referral Intake" });
 
 const loading = ref(true);
 const pageError = ref("");
@@ -170,11 +170,13 @@ async function confirmDelete() {
     pageError.value = `Could not delete "${r.title}".`;
   }
 }
-function open(r: Referral) {
+async function open(r: Referral) {
   // Opening a new referral starts its review.
   if (r.intake?.reviewStatus === "new") setStatus(r as Row, "in_review");
-  selectApplicant(r.id);
-  navigateTo("/processor");
+  try {
+    await selectApplicant(r.id);
+    await navigateTo({ path: "/processor", query: { applicant: r.id } });
+  } catch { pageError.value = "The saved review could not be opened. Please retry."; }
 }
 </script>
 
@@ -187,6 +189,8 @@ function open(r: Referral) {
       </div>
       <Button size="lg" @click="addApplicant"><Plus class="size-4" />Add applicant</Button>
     </div>
+
+    <AiSettingsPanel class="mb-6" />
 
     <section class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5" aria-label="Summary">
       <Card

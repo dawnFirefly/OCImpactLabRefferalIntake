@@ -1,34 +1,19 @@
-# Three-page handoff
+# Pages and persisted workspace
 
-The current scope is a navigation skeleton around the working processor. Each page can be built by a separate future agent. This document defines ownership; it does not dispatch agents.
+`app.vue` creates one root `useReviewWorkspace()` and provides it to the three existing routes. Navigation and refresh restore stored applicants via the opaque `?applicant=stored-<id>` query; the last applicant ID is also remembered in sessionStorage. Patient content and API keys are never placed in that storage.
 
-| Future owner | Files | Responsibility |
-| --- | --- | --- |
-| Dashboard | `frontend/app/pages/index.vue`, `frontend/server/` | Applicant list, PDF upload to server storage, select applicant and open `/processor`. |
-| Processor | `frontend/app/pages/processor.vue`, `frontend/app/components/DecisionProcessor.vue` | Existing one-PDF → forms/sections → facts → application requirements review. Preserve preview and review interactions. |
-| Summary | `frontend/app/pages/summary.vue` | Read-only view of the active referral's recommendation, gaps, DOC-1–DOC-10 and decision-tree stages with source pages. Model output takes priority over the original HTML mock. Do not infer rejection reasons from historical labels. Draft hospital response is not built yet. |
+- `/`: persistent applicant list, intake editing, AI settings, review-status controls.
+- `/processor`: one original PDF, forms/facts graph, criteria checklist, source review and per-item adjustments.
+- `/summary`: read-only view of the selected applicant's recommendation, gaps, documents and evidence.
 
-Shared files (`app.vue`, `layouts/default.vue`, `composables/useReviewWorkspace.ts`, `types.ts`, shared CSS) require coordination. Prefer page-scoped styles/components for future work.
+Homepage creation and processor uploads persist the original PDF/intake before analysis. `createApplicantForAnalysis` is asynchronous; callers must await it and use the returned applicant ID in navigation. `selectApplicant` is also asynchronous and loads the saved graph.
 
-## Session contract
+The `Referral` model contains every document, section, fact, evidence item, rule and canonical relationship. Vue Flow displays a subset; never save only visible canvas nodes/edges. `graphLayout` stores all user-positioned node IDs and the viewport. `shared/workspace.ts` validates the graph, removes transport-only fields and checks bidirectional fact/rule links.
 
-`app.vue` creates `useReviewWorkspace()` once and provides it as `review-workspace`. Pages/components inject `ReturnType<typeof useReviewWorkspace>`. Do not instantiate independent workspaces per page: that resets selection and edits.
+`saveWorkspace` serializes saves per applicant and tracks acknowledged revisions. Fact/rule edits append audit records, preserve original values/rationale and invalidate affected recommendations. Layout changes save on drag/camera completion. Pending or failed saves remain visible and prevent internal navigation until resolved. A failed save leaves local edits in memory, with an explicit retry action.
 
-- `applicants`: session-local referral records, including fictional demo, optional local R01–R11 examples, and newly added applicants.
-- `referral`: active applicant and current facts/checklist/audit.
-- `selectApplicant(id)`: activates an existing record without discarding edits.
-- `addApplicant(name)`: adds and selects an empty record with `awaiting_pdf` status. It does not create a backend record.
-- `patientName`, `analyzing`, `analyze`, `cancelAnalysis`: explicit server analysis controls; switching applicants cancels browser waiting and prevents stale results from replacing another applicant.
-- Existing `attach`, `updateFact`, and `updateRule` mutate session data. One combined PDF per applicant. Upload on a new empty record retains its ID/name.
-- Object URLs live for the root session and are revoked on root unmount. An explicit `savePdf` action persists the original PDF to private R2 and sets the document's `storage` receipt. Attachment and preview remain local. `savingPdf` exposes the request state. Records/receipts are session-local; there is no saved-applicant reloading API.
-- `loadStoredApplicants()`, `createStoredApplicant(fields, file)`, `updateStoredApplicant(id, fields)`, `deleteStoredApplicant(id)`: server-persisted applicants (`stored-<id>` records with `intake` details; document `local_url` is `/api/applicants/<id>/pdf`). Review status (`new` shown as "Open", `in_review`, `needs_info`, `approved`, `denied`) is set only by a coordinator. `approved`/`denied` record the coordinator's decision; never set them from model output or checklist counts.
+The server uses conditional R2 writes or atomic disk replacement to save complete snapshots; revisions prevent another tab from silently replacing newer work. Deletion leaves a data-free marker so stale analysis/save requests cannot recreate a review. Legacy analysis JSON loads through the workspace endpoint with revision zero until its first workspace save. Reanalysis after human edits requires a separate applicant, preserving the reviewed record.
 
-The shared navigation links `/`, `/processor`, and `/summary`. Direct links initialize a demo workspace. Route navigation preserves the active applicant. Refresh resets all session changes. The processor uses an explicit **Continue to summary** link. A future analysis agent can navigate to `/summary` after a real completion event; no fake completion timer exists now.
+`makeAnalysisProvider` captures the selected settings for each job. Workers AI is the default. Keys are session-only and do not enter workspace records. The browser's PDF.js renderer supplies physical-page images to Cloudflare/OpenCode; Anthropic receives the original PDF. Synthetic/provided local examples stay distinct from real persisted applicants.
 
-The summary shows only what the analysis returned (recommendation, rule statuses and notes, cited evidence) or, without a recommendation, the staged decision tree over the current checklist. It invents no conclusions and records no decision. Dashboard creation requires a name/reference and one PDF.
-
-## Verification
-
-Run tests, typecheck and build. Exercise dashboard → create/select applicant → processor → summary → back. Check edits remain on the same applicant and R01–R11 stay separate. Never distribute `public/local-demo` packets in a build.
-
-Dashboard **Add applicant** uses `createApplicantForAnalysis(fields, file)`: creates a session record with intake details, keeps the original File and a blob preview in memory, starts foreground Claude analysis immediately, and navigates to `/processor`. It does not call `/api/applicants` or queue background analysis. Editing/status/deletion of session applicants stays local. New applicants and their results reset on reload; legacy stored applicants retain the storage workflow.
+Run tests, typecheck, regular/Worker builds, and relevant browser flows with fictional packets only. See README for deployment/public-access settings and current provider/background-work limits.

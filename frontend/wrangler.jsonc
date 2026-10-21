@@ -15,11 +15,13 @@
     "binding": "ASSETS",
     "directory": ".output/public"
   },
+  "ai": { "binding": "AI" },
   "r2_buckets": [
     { "binding": "REFERRAL_PDFS", "bucket_name": "referralready" },
     { "binding": "REFERRAL_PACKETS", "bucket_name": "referralready" }
   ],
   "vars": {
+    "NUXT_AI_PROVIDER": "cloudflare",
     "NUXT_WORKSPACE_ORIGIN": "https://ocimpactlabrefferalintake.notnaren.workers.dev",
     "NUXT_CLOUDFLARE_ACCESS_TEAM_DOMAIN": "dawnff.cloudflareaccess.com",
     "NUXT_CLOUDFLARE_ACCESS_AUDIENCE": "c2041466dfcf1809cc651d534837dc5eeeacafe8d15d8abf1b7801e1e855aeb9",

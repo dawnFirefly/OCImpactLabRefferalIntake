@@ -1,4 +1,6 @@
-import { anthropicKey } from "../utils/credentials";
+import { selectAi } from "../utils/ai-provider";
+import { visionInputSchema } from "../utils/vision-analysis";
+import { maxVisionBody } from "../../shared/ai";
 import { streamAnalysis } from "../utils/run-analysis";
 import { requireWorkspace } from "../utils/workspace-access";
 import { maxPacketBytes } from "../../shared/upload-limits";
@@ -14,10 +16,15 @@ export default defineEventHandler(async event => {
   setResponseHeader(event, "Cache-Control", "no-store");
   const config = useRuntimeConfig(event);
   await requireWorkspace(event, config);
+  const selected = selectAi(event);
+  if (selected.provider !== "anthropic") {
+    await assertBodySize(event, maxVisionBody);
+    const parsed = visionInputSchema.safeParse(await readBody(event));
+    if (!parsed.success) throw createError({ statusCode: 400, statusMessage: "Choose up to 60 valid rendered PDF pages (24 MB total)." });
+    return streamAnalysis(event, { pages: parsed.data.pages, fileName: parsed.data.fileName || "applicant.pdf", patientName: parsed.data.patientName || "" });
+  }
   const length = Number(getHeader(event, "content-length"));
   if (!Number.isFinite(length) || length <= 0 || length > maxBytes + 65536) throw createError({ statusCode: 413, statusMessage: "Choose one PDF up to 50 MB." });
-  const apiKey = anthropicKey(config, event.context.cloudflare?.env);
-  if (!apiKey) throw createError({ statusCode: 503, statusMessage: "Claude is not configured. Set the server-only NUXT_ANTHROPIC_API_KEY secret." });
   // The browser sends the raw PDF bytes (no multipart parsing: cheaper on the Worker's CPU budget).
   if (!getHeader(event, "content-type")?.startsWith("application/pdf")) throw createError({ statusCode: 415, statusMessage: "Send one PDF file." });
   const decode = (value: string | undefined) => { try { return decodeURIComponent(value || "").trim(); } catch { return ""; } };

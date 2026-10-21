@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { H3Event } from "h3";
+import { localExclusive } from "./workspace-store.ts";
 
 export const REVIEW_STATUSES = ["new", "in_review", "needs_info", "approved", "denied"] as const;
 export const PRIORITIES = ["routine", "urgent"] as const;
@@ -60,6 +61,7 @@ export function parseIntake(input: Record<string, unknown>, partial: boolean): P
   const out: Partial<IntakeFields> = {};
   const text = (key: keyof typeof LIMITS) => {
     if (input[key] === undefined) return;
+    if (typeof input[key] !== "string") throw createError({ statusCode: 400, statusMessage: `Invalid ${key}.` });
     const value = String(input[key]).trim();
     if (value.length > LIMITS[key]) {
       throw createError({ statusCode: 400, statusMessage: `${key} is too long (max ${LIMITS[key]} characters).` });
@@ -70,7 +72,7 @@ export function parseIntake(input: Record<string, unknown>, partial: boolean): P
   if (!partial || out.name !== undefined) {
     if (!out.name) throw createError({ statusCode: 400, statusMessage: "Enter an applicant name or reference." });
   }
-  if (out.receivedAt) {
+  if (out.receivedAt !== undefined) {
     const date = new Date(out.receivedAt);
     if (Number.isNaN(date.getTime())) throw createError({ statusCode: 400, statusMessage: "Received time is invalid." });
     out.receivedAt = date.toISOString();
@@ -101,7 +103,7 @@ function normalize(packet: Partial<StoredPacket> & { id: string }): StoredPacket
 export const MAX_PACKET_BYTES = 50 * 1024 * 1024;
 
 /** Local disk store in `frontend/.data/referrals` (Git-ignored). */
-function localStore(): PacketStore {
+export function localStore(): PacketStore {
   const root = resolve(process.cwd(), ".data/referrals");
   const files = join(root, "files");
   const analyses = join(root, "analyses");
@@ -110,15 +112,18 @@ function localStore(): PacketStore {
   async function load(): Promise<StoredPacket[]> {
     try {
       return (JSON.parse(await readFile(indexPath, "utf8")) as StoredPacket[]).map(normalize);
-    } catch {
-      return [];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
     }
   }
   async function persist(entries: StoredPacket[]) {
     await mkdir(root, { recursive: true });
-    await writeFile(indexPath, JSON.stringify(entries, null, 2));
+    const temporary = `${indexPath}.${randomUUID()}.tmp`;
+    await writeFile(temporary, JSON.stringify(entries, null, 2));
+    await rename(temporary, indexPath);
   }
-  return {
+  const store: PacketStore = {
     list: load,
     async save(meta, bytes) {
       const packet: StoredPacket = { ...meta, id: randomUUID(), storage: "local" };
@@ -184,6 +189,11 @@ function localStore(): PacketStore {
       return true;
     },
   };
+  return new Proxy(store, { get(target, property: keyof PacketStore) {
+    const method = target[property];
+    if (["save", "update", "remove", "saveAnalysis"].includes(property)) return (...args: unknown[]) => localExclusive(indexPath, () => (method as (...args: unknown[]) => Promise<unknown>)(...args));
+    return method;
+  } });
 }
 
 type DriveConfig = { clientId: string; clientSecret: string; refreshToken: string; folderId: string };
@@ -345,7 +355,7 @@ type R2Bucket = {
  * Cloudflare R2 store: PDFs at `packets/<id>.pdf`, applicant details in one `index.json`
  * (one cheap read per dashboard load instead of a bucket listing).
  */
-function r2Store(bucket: R2Bucket): PacketStore {
+export function r2Store(bucket: R2Bucket): PacketStore {
   const INDEX = "index.json";
   const fileKey = (id: string) => `packets/${id}.pdf`;
   const analysisKey = (id: string) => `analyses/${id}.json`;
@@ -362,8 +372,8 @@ function r2Store(bucket: R2Bucket): PacketStore {
       const result = fn(entries);
       const written = await bucket.put(INDEX, JSON.stringify(entries), {
         httpMetadata: { contentType: "application/json" },
-        // The very first write (no index yet) is unconditional.
-        ...(etag ? { onlyIf: { etagMatches: etag } } : {}),
+        // Protect index creation too: concurrent first uploads must not lose a record.
+        onlyIf: etag ? { etagMatches: etag } : { etagDoesNotMatch: "*" },
       });
       if (written) return result;
     }
@@ -376,7 +386,8 @@ function r2Store(bucket: R2Bucket): PacketStore {
     async save(meta, bytes) {
       const packet: StoredPacket = { ...meta, id: randomUUID(), storage: "r2" };
       await bucket.put(fileKey(packet.id), bytes, { httpMetadata: { contentType: "application/pdf" } });
-      await change((entries) => entries.push(packet));
+      try { await change((entries) => entries.push(packet)); }
+      catch (error) { await bucket.delete(fileKey(packet.id)); throw error; }
       return packet;
     },
     async update(id, fields) {
@@ -412,11 +423,13 @@ function r2Store(bucket: R2Bucket): PacketStore {
     async saveAnalysis(id, json, meta) {
       if (!safeId(id)) return false;
       await bucket.put(analysisKey(id), json, { httpMetadata: { contentType: "application/json" } });
-      return change((entries) => {
+      const saved = await change((entries) => {
         const entry = entries.find((e) => e.id === id);
         if (entry) entry.analysis = meta;
         return !!entry;
       });
+      if (!saved) await bucket.delete(analysisKey(id));
+      return saved;
     },
   };
 }
@@ -430,6 +443,7 @@ let localSingleton: PacketStore | null = null;
 export function usePacketStore(event: H3Event): PacketStore {
   const bucket = (event.context.cloudflare?.env as Record<string, unknown> | undefined)?.REFERRAL_PACKETS;
   if (bucket) return r2Store(bucket as R2Bucket);
+  if (event.context.cloudflare) throw createError({ statusCode: 503, statusMessage: "Applicant storage is not configured." });
   const config = useRuntimeConfig(event).googleDrive as DriveConfig;
   if (config.clientId && config.clientSecret && config.refreshToken && config.folderId) {
     return (driveSingleton ??= driveStore(config));

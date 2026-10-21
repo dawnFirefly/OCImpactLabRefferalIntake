@@ -9,6 +9,7 @@ export default defineNuxtConfig({
       nodeCompat: true,
       wrangler: {
         name: "ocimpactlabrefferalintake",
+        ai: { binding: "AI" },
         r2_buckets: [
           { binding: "REFERRAL_PDFS", bucket_name: "referralready" },
           { binding: "REFERRAL_PACKETS", bucket_name: "referralready" },
@@ -17,6 +18,12 @@ export default defineNuxtConfig({
     },
   },
   runtimeConfig: {
+    aiProvider: "cloudflare",
+    cloudflareAiToken: "",
+    cloudflareAccountId: "",
+    opencodeApiKey: "",
+    opencodeExtractionModel: "",
+    opencodeReviewModel: "",
     anthropicApiKey: "",
     workspaceOrigin: "",
     cloudflareAccessTeamDomain: "",
@@ -35,11 +42,11 @@ export default defineNuxtConfig({
   shadcn: { prefix: "", componentDir: "./app/components/ui" },
   app: {
     head: {
-      title: "ReferralReady · Decision factors",
+      title: "Referral Intake · Decision factors",
       meta: [
         {
           name: "description",
-          content: "Source-linked referral decision-factor review.",
+          content: "A one-day hackathon prototype for reviewing hospital referral PDFs with source-linked AI suggestions and coordinator review.",
         },
       ],
     },

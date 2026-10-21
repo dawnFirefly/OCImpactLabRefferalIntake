@@ -1,5 +1,6 @@
 /** Creates an applicant from intake details and exactly one combined referral PDF. */
 export default defineEventHandler(async (event) => {
+  await assertBodySize(event, MAX_PACKET_BYTES + 65536);
   const parts = (await readMultipartFormData(event)) || [];
   const files = parts.filter((p) => p.name === "file" && p.filename);
   const form = Object.fromEntries(
@@ -19,6 +20,8 @@ export default defineEventHandler(async (event) => {
   }
   const store = usePacketStore(event);
   const limit = storageLimitBytes(event);
+  const driveConfig = useRuntimeConfig(event).googleDrive;
+  if ([driveConfig.clientId, driveConfig.clientSecret, driveConfig.refreshToken, driveConfig.folderId].every(Boolean) && !event.context.cloudflare) throw createError({ statusCode: 503, statusMessage: "New persistent reviews require local disk or R2. Disable Google Drive storage to continue." });
   const used = (await store.list()).reduce((sum, p) => sum + (p.size || 0), 0);
   if (used + file.data.length > limit) {
     const size = (bytes: number) =>

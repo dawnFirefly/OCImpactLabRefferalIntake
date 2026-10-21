@@ -17,7 +17,7 @@ export type ReviewTarget =
 
 const props = defineProps<{ target: ReviewTarget }>();
 const emit = defineEmits<{ close: []; select: [target: ReviewTarget] }>();
-const { referral, updateFact, updateRule } = inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
+const { referral, updateFact, updateRule, saveState } = inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
 
 const isPacketMock = computed(() => referral.value.status === "mock_review");
 const fact = computed<Fact | undefined>(() => props.target.kind === "fact" ? referral.value.facts.find((f) => f.id === props.target.id) : undefined);
@@ -59,8 +59,8 @@ function focusPageNumber(page: number) {
 }
 
 const editValue = ref(""), editNote = ref(""), reviewStatus = ref("unknown"), reviewError = ref(""), saved = ref("");
-const adjusting = ref(false);
-watch(() => [props.target.kind, props.target.id, props.target.kind === "rule" ? props.target.factId : "",
+const adjusting = ref(false), saving = ref(false);
+watch(() => [referral.value.id, props.target.kind, props.target.id, props.target.kind === "rule" ? props.target.factId : "",
   preferredEvidence.value?.id, preferredEvidence.value?.page, section.value?.pages.join(",")], () => {
   editValue.value = fact.value?.value || "";
   editNote.value = fact.value?.review_note || rule.value?.note || "";
@@ -71,24 +71,37 @@ watch(() => [props.target.kind, props.target.id, props.target.kind === "rule" ? 
   focusTick.value++;
 }, { immediate: true });
 
-function save(status = "confirmed") {
+async function save(status = "confirmed") {
+  if (saving.value) return;
+  const applicantId = referral.value.id, targetId = props.target.id;
   if (editNote.value.trim().length < 3) return void (reviewError.value = "Add a short note explaining the adjustment.");
+  saving.value = true;
+  try {
   if (fact.value) {
     if (!editValue.value.trim()) return void (reviewError.value = "Enter a value.");
-    updateFact(fact.value, editValue.value.trim(), editNote.value, status);
-  } else if (rule.value) updateRule(rule.value, reviewStatus.value, editNote.value);
+    await updateFact(fact.value, editValue.value.trim(), editNote.value, status);
+  } else if (rule.value) await updateRule(rule.value, reviewStatus.value, editNote.value);
   reviewError.value = "";
-  saved.value = "Saved for this session. Linked requirements were flagged for recheck.";
+  if (referral.value.id === applicantId && props.target.id === targetId) saved.value = applicantId.startsWith("stored-") ? "Saved to this applicant. Linked requirements were flagged for recheck." : "Saved for this demo session.";
+  } catch {
+    if (referral.value.id === applicantId && props.target.id === targetId) reviewError.value = "Not saved to storage. Your changes remain in this tab. Use Retry save above before leaving.";
+  } finally { saving.value = false; }
 }
+watch(saveState, state => {
+  if (state === "saved" && reviewError.value.startsWith("Not saved to storage")) {
+    reviewError.value = "";
+    saved.value = "Saved to this applicant. Linked requirements were flagged for recheck.";
+  }
+});
 const statusOptions: [string, string][] = [
   ["met", "Completed"], ["uncertain", "Uncertain"], ["missing", "Missing evidence"], ["not_met", "Requirement not met"],
   ["concern", "Needs clarification"], ["not_applicable", "Not applicable"], ["unknown", "Unknown"],
 ];
 const sourceNote = computed(() => isPacketMock.value
   ? "Mock review from the supplied packet summary. No page citations were extracted; scroll the packet to verify."
-  : referral.value.status === "analyzing" ? "Provisional · Claude is still writing. Adjust after the validated result arrives."
-  : referral.value.status === "analyzed" ? "Claude-reported pages and quotes. Verify against the PDF. Original values are kept when you edit."
-  : referral.value.status === "demo" ? "Synthetic PDF with authored example anchors." : "Browser-only preview. Analyze with Claude to link facts to pages.");
+  : referral.value.status === "analyzing" ? "Provisional · AI is still writing. Adjust after the validated result arrives."
+  : referral.value.status === "analyzed" ? "Model-reported pages and quotes. Verify against the PDF. Original values are kept when you edit."
+  : referral.value.status === "demo" ? "Synthetic PDF with authored example anchors." : "Browser-only preview. Analyze with AI to link facts to pages.");
 </script>
 
 <template>
@@ -137,7 +150,7 @@ const sourceNote = computed(() => isPacketMock.value
           :focus-key="focusTick"
           :bbox="currentEvidence && currentEvidence.page === focusPage ? currentEvidence.bbox : null"
           :cited-pages="citedPages"
-          :box-note="currentEvidence?.method === 'claude' ? 'Highlight position is approximate (located by Claude) · verify against the page.' : ''"
+          :box-note="currentEvidence && currentEvidence.method !== 'synthetic' ? 'Highlight position is approximate (located by AI) · verify against the page.' : ''"
         />
         <div v-else class="empty-evidence"><FileText :size="18" /> No PDF attached to this applicant.</div>
       </ClientOnly>
@@ -172,8 +185,8 @@ const sourceNote = computed(() => isPacketMock.value
         <p v-if="reviewError" class="error-box" role="alert">{{ reviewError }}</p>
         <p v-else-if="saved" class="tiny saved-note" role="status">{{ saved }}</p>
         <div class="dialog-actions">
-          <Button type="submit" size="sm">Save adjustment</Button>
-          <Button v-if="fact" type="button" size="sm" variant="outline" @click="save('questioned')">Flag for clarification</Button>
+          <Button type="submit" size="sm" :disabled="saving">{{ saving ? "Saving…" : "Save adjustment" }}</Button>
+          <Button v-if="fact" type="button" size="sm" variant="outline" :disabled="saving" @click="save('questioned')">Flag for clarification</Button>
         </div>
       </form>
     </template>
