@@ -13,27 +13,19 @@ Implemented: persistent uploads/full graph snapshots, item-scoped edits and grap
 - **Persistence includes the complete `/processor` workspace for each applicant**, not just homepage metadata or the original PDF. Store every node and relationship, including nodes outside the current graph page/filter, and restore notes to the exact patient and item.
 - Keep coordinator decisions distinct from AI recommendations, original evidence distinct from corrections, and one original combined PDF per applicant.
 
-## 1. Cloudflare MCP setup
+## 1. Cloudflare MCP setup and live deployment verification
 
-The project includes `.codex/config.toml` with the official Streamable HTTP endpoints:
-
-- Account API: `https://mcp.cloudflare.com/mcp` (OAuth required).
-- Documentation: `https://docs.mcp.cloudflare.com/mcp`.
-
-In a writable Codex installation, register and authorize the account connection:
-
-```sh
-codex mcp add cloudflare-api --url https://mcp.cloudflare.com/mcp
-codex mcp login cloudflare-api
-codex mcp add cloudflare-docs --url https://docs.mcp.cloudflare.com/mcp
-codex mcp list
-```
-
-If the trusted project's configuration already registers these names, use `codex mcp login cloudflare-api` and verify with `codex mcp list` instead of registering duplicates. Restart/reopen the Codex session when necessary to load project MCP configuration. Do not commit OAuth credentials or API tokens.
-
-Verified in this planning session: the documentation server successfully initialized, listed tools, and answered Workers AI documentation searches. Global registration was attempted but failed because the managed environment's Codex configuration directory is mounted read-only. Project configuration does not establish account authorization; account reads, binding changes, and deployments remain unverified.
-
-After OAuth, inspect the existing `ocimpactlabrefferalintake` Worker, R2 bindings, AI binding, access policy, and runtime limits through the API MCP. Keep the current Worker URL while changing the app/repository branding; a Worker rename is a separate migration.
+Verified via Cloudflare MCP and Cloudflare API:
+- Account: `bb6d78df57f6062338cc78cd9d01500a` (`chihsamuel@gmail.com`). Subdomain: `notnaren`.
+- Worker `ocimpactlabrefferalintake` is deployed at `https://ocimpactlabrefferalintake.notnaren.workers.dev`.
+- Private R2 bucket `referralready` is connected to bindings `REFERRAL_PDFS` and `REFERRAL_PACKETS`. Existing applicant records (`analyses/75d33c71-c996-4a41-b630-ff8f52c40c76.json`, `analyses/a207d8cf-a8f7-488a-a289-2a66e476faa7.json`, and `index.json`) are preserved.
+- Worker AI binding: configured as `AI` in `wrangler.jsonc` and `nuxt.config.ts`. Calls from the server use `event.context.cloudflare.env.AI` without requiring user API keys.
+- Model verification for `@cf/deepseek-ai/deepseek-v4.1-flash-1017`:
+  - Verified exact model ID exists in Cloudflare Workers AI registry (`id: 215ee9cf-aaa0-48bd-a084-00da8da2fbeb`).
+  - Multimodal 552B MoE model with 1,048,576 token context window, native vision support (accepts `image_url` data URIs in message content), and reasoning with effort controls.
+  - **Account & Tier Restriction:** Cloudflare requires Workers Paid (`require_workers_paid: "true"`). Live invocation against the authorized account returns `HTTP 403 (error 5035: Model @cf/deepseek-ai/deepseek-v4.1-flash-1017 is not available on the Workers Free plan)`.
+  - **Model Defaults & Free Tier Split:** In accordance with the user mandate to use free Workers AI without paid plan costs, the default models are set to Cloudflare's free-tier verified models: `@cf/meta/llama-3.2-11b-vision-instruct` for scanned-page extraction and `@cf/meta/llama-3.3-70b-instruct-fp8-fast` for criteria evaluation. Users with paid accounts can input `@cf/deepseek-ai/deepseek-v4.1-flash-1017` in the homepage AI settings panel.
+  - Meta license agreement was submitted and confirmed for the account (`prompt: "agree"`).
 
 References: [Cloudflare MCP servers](https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/), [Workers AI bindings](https://developers.cloudflare.com/workers-ai/configuration/bindings/).
 
