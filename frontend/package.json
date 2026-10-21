@@ -8,7 +8,7 @@
     "generate": "nuxt generate",
     "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare",
-    "test": "node --test tests/*.test.ts",
+    "test": "node --test --test-isolation=none tests/*.test.ts",
     "build:worker": "nuxt build --preset=cloudflare_module",
     "preview:worker": "wrangler dev",
     "deploy:worker": "wrangler deploy",

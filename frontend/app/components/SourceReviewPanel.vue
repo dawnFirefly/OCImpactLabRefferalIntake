@@ -63,7 +63,7 @@ const adjusting = ref(false), saving = ref(false);
 watch(() => [referral.value.id, props.target.kind, props.target.id, props.target.kind === "rule" ? props.target.factId : "",
   preferredEvidence.value?.id, preferredEvidence.value?.page, section.value?.pages.join(",")], () => {
   editValue.value = fact.value?.value || "";
-  editNote.value = fact.value?.review_note || rule.value?.note || "";
+  editNote.value = fact.value?.review_note || rule.value?.review_note || rule.value?.note || "";
   reviewStatus.value = rule.value?.status || "unknown";
   reviewError.value = saved.value = "";
   focusedEvidence.value = preferredEvidence.value?.id || null;

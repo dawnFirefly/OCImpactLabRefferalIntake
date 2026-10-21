@@ -82,7 +82,8 @@ export function useReviewWorkspace() {
     const id = typeof route.query.applicant === "string" ? route.query.applicant : sessionStorage.getItem("referral-active-id");
     if (!id?.startsWith("stored-")) return;
     if (!applicants.value.some(a => a.id === id)) await loadStoredApplicants();
-    if (typeof route.query.applicant === "string" && route.query.applicant !== id) return;
+    const desired = typeof route.query.applicant === "string" ? route.query.applicant : sessionStorage.getItem("referral-active-id");
+    if (desired !== id) return;
     if (!applicants.value.some(a => a.id === id)) { error.value = "This applicant is unavailable or was deleted."; return; }
     if (referral.value.id !== id) await selectApplicant(id);
     else await loadStoredAnalysis(referral.value);
@@ -248,11 +249,14 @@ export function useReviewWorkspace() {
     if (!applicant) return;
     cancelAnalysis();
     referral.value = applicant;
-    if (isStored(applicant) && import.meta.client) sessionStorage.setItem("referral-active-id", id);
+    if (import.meta.client) {
+      if (isStored(applicant)) sessionStorage.setItem("referral-active-id", id);
+      else sessionStorage.removeItem("referral-active-id");
+    }
     patientName.value = namesByApplicant.get(id) || (applicant.status === "analyzed" || applicant.status === "awaiting_pdf" ? applicant.title : "");
     mode.value = id === "synthetic-demo" ? "synthetic" : id.startsWith("provided-") ? "provided" : "attached";
     error.value = "";
-    await loadStoredAnalysis(applicant);
+    await loadStoredAnalysis(applicant, true);
   }
   function addApplicant(name: string) {
     cancelAnalysis();
@@ -301,8 +305,8 @@ export function useReviewWorkspace() {
     return result;
   }
   /** Restore the complete saved graph, including edits and layout, once per session. */
-  async function loadStoredAnalysis(record: Referral) {
-    if (!isStored(record) || loaded.has(record.id) || dirty.has(record.id)) return;
+  async function loadStoredAnalysis(record: Referral, refresh = false) {
+    if (!isStored(record) || (!refresh && loaded.has(record.id)) || dirty.has(record.id)) return;
     const saved = await $fetch<Workspace | null>(`/api/applicants/${encodeURIComponent(packetId(record.id))}/workspace`);
     revisions.set(record.id, saved?.revision || 0);
     loaded.add(record.id);
@@ -362,6 +366,8 @@ export function useReviewWorkspace() {
   /** Adds stored applicants without replacing session records (and their edits) already loaded. */
   async function loadStoredApplicants() {
     const packets = await $fetch<StoredPacket[]>("/api/applicants");
+    const serverIds = new Set(packets.map(p => `stored-${p.id}`));
+    applicants.value = applicants.value.filter(a => !isStored(a) || serverIds.has(a.id) || dirty.has(a.id));
     for (const packet of packets) {
       const existing = applicants.value.find(a => a.id === `stored-${packet.id}`);
       if (!existing) applicants.value.push(storedReferral(packet));
@@ -413,8 +419,10 @@ export function useReviewWorkspace() {
     applicants.value = applicants.value.filter((a) => a.id !== id);
     if (referral.value.id === id) selectApplicant("synthetic-demo");
   }
-  function resetDemo() {
+  async function resetDemo() {
+    try { await flushSaves(); } catch { return; }
     cancelAnalysis();
+    sessionStorage.removeItem("referral-active-id");
     patientName.value = "";
     attachedFiles.value = [];
     referral.value = createDemo();
@@ -422,6 +430,7 @@ export function useReviewWorkspace() {
     error.value = "";
     mode.value = "synthetic";
     rememberApplicant();
+    if (["/processor", "/summary"].includes(route.path) && route.query.applicant) await router.replace({ path: route.path, query: {} });
   }
   function useProvidedDocument(document: PacketDocument) {
     cancelAnalysis();
