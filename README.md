@@ -68,7 +68,20 @@ Wrangler and Nitro both declare `AI`, `REFERRAL_PACKETS`, and `REFERRAL_PDFS`. T
 
 ### Branch previews versus production deployment
 
-Use `npm run deploy:worker` (or `npx wrangler deploy`) as the production deploy command. Cloudflare branch-preview builds may instead run `npx wrangler preview`; the tracked `previews: {}` block allows that command to run. `preview_urls` is a separate setting and does not replace this block.
+Cloudflare Workers Builds settings for this repository:
+
+| Setting | Value |
+| --- | --- |
+| Root directory | Repository root (`/`) |
+| Build command | Leave empty; the Wrangler custom build installs/builds `frontend/` |
+| Production deploy command | `npx wrangler deploy` |
+| Branch preview command | `npx wrangler preview` |
+
+The canonical `wrangler.jsonc` is at the repository root, where Cloudflare can discover it. Its custom build runs `npm ci --prefix frontend && npm --prefix frontend run build:worker`, and its entry point/assets paths include `frontend/`. Local npm scripts change Wrangler's working directory back to the root. The application dependencies remain in `frontend/package.json`; the lack of a root package does not prevent the explicit custom build from installing them.
+
+The build must use a commit containing these changes. PR #3 remains unmerged: rebuilding `main` or an older failed commit will not pick up fixes pushed to its repair branch. Rebuild the latest `codex/referral-intake-persistence-ai` commit, or merge the reviewed PR before building `main`.
+
+Use `npm run deploy:worker` from `frontend/` (or `npx wrangler deploy` from the repository root) as the production deploy command. Cloudflare branch-preview builds may instead run `npx wrangler preview`; the tracked `previews: {}` block allows that command to run. `preview_urls` is a separate setting and does not replace this block.
 
 Previews do not inherit production bindings, variables, or secrets. Before testing applicant workflows in a branch preview, configure `previews.ai`, point `previews.r2_buckets` at a separately provisioned test bucket, and configure `previews.vars` with the preview's HTTPS workspace origin and intended access settings. Keep assets and compatibility settings at the top level. Do not reuse the production patient bucket for branch previews. The empty block unblocks preview creation; it does not provision those account resources. See [Cloudflare Preview configuration](https://developers.cloudflare.com/workers/previews/configuration/).
 

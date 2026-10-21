@@ -4,6 +4,8 @@ The current user authorized the repair plan in `docs/repair-plan.md`: display na
 
 New applicant uploads on the dashboard and processor persist PDFs/intake before analysis. Store the complete typed Referral graph and canonical links, never only visible Vue Flow nodes. Workspace endpoints validate IDs/references and use conditional revisions. Preserve originals and patient/item-specific corrections/notes. Keys remain session-only/private. PDF.js page rendering for server-side vision is authorized; local OCR remains out of scope. Reanalysis cannot overwrite human edits; add a separate applicant to rerun it. All API routes share access middleware. The tracked public demo setting is explicit in README; do not silently change account access or the deployed hostname.
 
+The canonical Wrangler config is `/wrangler.jsonc` at repository root; its custom build installs/builds `frontend/`. Frontend deploy/dev/secret scripts use `--cwd ..` so Wrangler resolves root-relative paths. Cloudflare Workers Builds must use the repository root and a commit containing the repair.
+
 Read the current README, `docs/page-handoff.md` and `docs/claude-integration.md` for the updated architecture. Keep three routes and the existing review/decision semantics. Run `npm test`, `npm run typecheck`, regular/Worker builds, and relevant browser flows before delivery. Never commit real packets, credentials or generated output.
 
 ---

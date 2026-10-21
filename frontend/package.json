@@ -10,9 +10,9 @@
     "postinstall": "nuxt prepare",
     "test": "node --test --test-isolation=none tests/*.test.ts",
     "build:worker": "nuxt build --preset=cloudflare_module",
-    "preview:worker": "wrangler dev",
-    "deploy:worker": "wrangler deploy",
-    "secret:claude": "wrangler secret put NUXT_ANTHROPIC_API_KEY"
+    "preview:worker": "wrangler dev --cwd ..",
+    "deploy:worker": "wrangler deploy --cwd ..",
+    "secret:claude": "wrangler secret put NUXT_ANTHROPIC_API_KEY --cwd .."
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

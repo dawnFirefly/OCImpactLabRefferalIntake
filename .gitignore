@@ -225,6 +225,7 @@ frontend/.nuxt/
 frontend/.output/
 frontend/.data/
 frontend/.wrangler/
+/.wrangler/
 .dev.vars
 .dev.vars.*
 .env
