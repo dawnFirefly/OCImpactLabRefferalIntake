@@ -15,6 +15,10 @@
     "binding": "ASSETS",
     "directory": ".output/public"
   },
+  // Required by Workers Builds when a branch is published with `wrangler preview`.
+  // Preview bindings/vars do not inherit production values. Configure isolated preview
+  // storage and its allowed origin in this block before testing applicant workflows.
+  "previews": {},
   "ai": { "binding": "AI" },
   "r2_buckets": [
     { "binding": "REFERRAL_PDFS", "bucket_name": "referralready" },

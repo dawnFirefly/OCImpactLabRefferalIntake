@@ -66,6 +66,12 @@ npm run deploy:worker
 
 Wrangler and Nitro both declare `AI`, `REFERRAL_PACKETS`, and `REFERRAL_PDFS`. The existing Worker name/URL are retained: `https://ocimpactlabrefferalintake.notnaren.workers.dev`.
 
+### Branch previews versus production deployment
+
+Use `npm run deploy:worker` (or `npx wrangler deploy`) as the production deploy command. Cloudflare branch-preview builds may instead run `npx wrangler preview`; the tracked `previews: {}` block allows that command to run. `preview_urls` is a separate setting and does not replace this block.
+
+Previews do not inherit production bindings, variables, or secrets. Before testing applicant workflows in a branch preview, configure `previews.ai`, point `previews.r2_buckets` at a separately provisioned test bucket, and configure `previews.vars` with the preview's HTTPS workspace origin and intended access settings. Keep assets and compatibility settings at the top level. Do not reuse the production patient bucket for branch previews. The empty block unblocks preview creation; it does not provision those account resources. See [Cloudflare Preview configuration](https://developers.cloudflare.com/workers/previews/configuration/).
+
 All API endpoints enforce the shared workspace access boundary. Localhost is allowed; remote access requires the configured HTTPS origin and verified Cloudflare Access identity unless explicit public demo mode is enabled. **The tracked deployment currently retains `NUXT_WORKSPACE_PUBLIC_ACCESS=true`**, matching the prior deployment. Set it to `false` and configure Access before using private patient packets. Public mode shares applicant records with anyone who can access the deployment.
 
 Keep tokens in Worker secrets/private local environment variables; never put them in Wrangler `vars`, public Nuxt config, source, screenshots, or patient records. The Workers AI binding needs no app-user API key.
