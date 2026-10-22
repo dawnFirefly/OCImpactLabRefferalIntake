@@ -3,8 +3,11 @@
   "name": "ocimpactlabrefferalintake",
   "account_id": "bb6d78df57f6062338cc78cd9d01500a",
   "main": "frontend/.output/server/index.mjs",
-  // Root-level Workers Builds may run only the deploy command: install/build the nested app first.
-  "build": { "command": "npm ci --prefix frontend && npm --prefix frontend run build:worker" },
+  // Workers Builds may start in the repository root or frontend/. Resolve the
+  // shared build script before it installs/builds from its own absolute path.
+  "build": {
+    "command": "node -e \"require(require('node:fs').existsSync('scripts/build-worker.cjs') ? './scripts/build-worker.cjs' : '../scripts/build-worker.cjs')\""
+  },
   "compatibility_date": "2026-10-17",
   "compatibility_flags": ["nodejs_compat"],
   // This account is on the Workers Free plan (~10 ms CPU per request), which rejects `limits.cpu_ms`.
