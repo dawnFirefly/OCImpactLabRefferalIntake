@@ -77,9 +77,11 @@ Cloudflare Workers Builds settings for this repository:
 | Production deploy command | `npx wrangler deploy` |
 | Branch preview command | `npx wrangler preview` |
 
-The canonical `wrangler.jsonc` is at the repository root, where Cloudflare can discover it. Its custom build runs `npm ci --prefix frontend && npm --prefix frontend run build:worker`, and its entry point/assets paths include `frontend/`. Local npm scripts change Wrangler's working directory back to the root. The application dependencies remain in `frontend/package.json`; the lack of a root package does not prevent the explicit custom build from installing them.
+The canonical `wrangler.jsonc` is at the repository root, where Cloudflare can discover it. Its custom build locates `scripts/build-worker.cjs` from either the repository root or `frontend/`. That script runs `npm ci --include=dev` and `npm run build:worker` in the frontend directory resolved from the script's location. Its entry point/assets paths include `frontend/`. The application dependencies remain in `frontend/package.json`; the lack of a root package does not prevent the explicit custom build from installing them.
 
-The build must use a commit containing these changes. PR #3 remains unmerged: rebuilding `main` or an older failed commit will not pick up fixes pushed to its repair branch. Rebuild the latest `codex/referral-intake-persistence-ai` commit, or merge the reviewed PR before building `main`.
+The build must use a commit containing these changes. Retry a build on the latest commit after merging a build fix; retrying an older failed commit keeps its old configuration.
+
+If `npm ci` reports a missing lockfile during the custom build even though Cloudflare's initial dependency installation succeeded, check the build's working directory. The previous relative `--prefix frontend` command looked for `frontend/frontend/package-lock.json` when Workers Builds started in `frontend/`. The anchored script supports both starting directories; the recommended Cloudflare root setting remains `/`.
 
 Use `npm run deploy:worker` from `frontend/` (or `npx wrangler deploy` from the repository root) as the production deploy command. Cloudflare branch-preview builds may instead run `npx wrangler preview`; the tracked `previews: {}` block allows that command to run. `preview_urls` is a separate setting and does not replace this block.
 
