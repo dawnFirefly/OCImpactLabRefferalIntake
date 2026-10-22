@@ -85,9 +85,9 @@ async function save() {
       await updateStoredApplicant(props.applicant!.id, fields);
       open.value = false;
     } else {
-      createApplicantForAnalysis(fields, file.value!);
+      const id = await createApplicantForAnalysis(fields, file.value!);
       open.value = false;
-      await navigateTo("/processor");
+      await navigateTo({ path: "/processor", query: { applicant: id } });
     }
   } catch (e: any) {
     error.value = e?.data?.statusMessage || e?.statusMessage || "Could not save. Try again.";
@@ -103,7 +103,7 @@ async function save() {
       <DialogHeader>
         <DialogTitle>{{ editing ? "Edit applicant details" : "Add applicant" }}</DialogTitle>
         <DialogDescription>
-          {{ editing ? "Update intake details. The referral PDF is not changed." : "Upload the combined referral packet. Adding the applicant opens the processor and starts Claude analysis. Review is due 2 hours after receipt." }}
+          {{ editing ? "Update intake details. The referral PDF is not changed." : "Upload the combined referral packet. Adding the applicant opens the processor and saves the packet and starts AI analysis. Review is due 2 hours after receipt." }}
         </DialogDescription>
       </DialogHeader>
 
@@ -179,7 +179,7 @@ async function save() {
       <DialogFooter>
         <Button type="button" variant="outline" :disabled="saving" @click="open = false">Cancel</Button>
         <Button type="submit" form="intake-form" :disabled="!canSave">
-          {{ saving ? (editing ? "Saving…" : "Starting analysis…") : editing ? "Save changes" : "Add applicant" }}
+          {{ saving ? (editing ? "Saving…" : "Saving applicant…") : editing ? "Save changes" : "Add applicant" }}
         </Button>
       </DialogFooter>
     </DialogContent>

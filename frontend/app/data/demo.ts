@@ -192,7 +192,7 @@ export function createDemo(): Referral {
     audit: [],
     checklist: {
       precedence:
-        "Illustrative UI fields only; the future Claude integration will use validated IHH rules.",
+        "Illustrative UI fields only; live AI analysis uses the pinned IHH rules.",
       source_url: "",
       rules,
       counts: { met: rules.filter(r => r.status === "met").length, missing: 5, uncertain: 1 },

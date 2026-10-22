@@ -1,10 +1,10 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
+  "$schema": "frontend/node_modules/wrangler/config-schema.json",
   "name": "ocimpactlabrefferalintake",
   "account_id": "bb6d78df57f6062338cc78cd9d01500a",
-  "main": ".output/server/index.mjs",
-  // `wrangler deploy` (Workers Builds deploy command) builds the Nuxt Worker first, so .output exists.
-  "build": { "command": "npm run build:worker" },
+  "main": "frontend/.output/server/index.mjs",
+  // Root-level Workers Builds may run only the deploy command: install/build the nested app first.
+  "build": { "command": "npm ci --prefix frontend && npm --prefix frontend run build:worker" },
   "compatibility_date": "2026-10-17",
   "compatibility_flags": ["nodejs_compat"],
   // This account is on the Workers Free plan (~10 ms CPU per request), which rejects `limits.cpu_ms`.
@@ -13,13 +13,19 @@
   "observability": { "enabled": true },
   "assets": {
     "binding": "ASSETS",
-    "directory": ".output/public"
+    "directory": "frontend/.output/public"
   },
+  // Required by Workers Builds when a branch is published with `wrangler preview`.
+  // Preview bindings/vars do not inherit production values. Configure isolated preview
+  // storage and its allowed origin in this block before testing applicant workflows.
+  "previews": {},
+  "ai": { "binding": "AI" },
   "r2_buckets": [
     { "binding": "REFERRAL_PDFS", "bucket_name": "referralready" },
     { "binding": "REFERRAL_PACKETS", "bucket_name": "referralready" }
   ],
   "vars": {
+    "NUXT_AI_PROVIDER": "cloudflare",
     "NUXT_WORKSPACE_ORIGIN": "https://ocimpactlabrefferalintake.notnaren.workers.dev",
     "NUXT_CLOUDFLARE_ACCESS_TEAM_DOMAIN": "dawnff.cloudflareaccess.com",
     "NUXT_CLOUDFLARE_ACCESS_AUDIENCE": "c2041466dfcf1809cc651d534837dc5eeeacafe8d15d8abf1b7801e1e855aeb9",

@@ -47,3 +47,11 @@ test("temporary public access skips only the sign-in check, never the origin or 
   const other = new URL("https://other.example.com/api/analyze");
   await assert.rejects(checkWorkspaceAccess({ url: other, origin: other.origin }, config), /not enabled/);
 });
+
+test("same-origin reads may omit Origin; mutations and cross-site reads cannot", async () => {
+  const local = { url: new URL("http://localhost:3000/api/applicants"), method: "GET" };
+  await checkWorkspaceAccess(local, config);
+  await assert.rejects(checkWorkspaceAccess({ ...local, method: "POST" }, config), /own page/);
+  await assert.rejects(checkWorkspaceAccess({ ...local, fetchSite: "cross-site" }, config), /own page/);
+  await checkWorkspaceAccess({ url: remote.url, method: "GET" }, { ...config, workspacePublicAccess: "true" });
+});

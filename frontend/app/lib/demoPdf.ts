@@ -27,7 +27,7 @@ export function createDemoPdf(
   ];
   for (let page = 1; page <= pageCount; page++) {
     let content = "0.2 0.27 0.21 rg\n";
-    content += text("REFERRALREADY / SYNTHETIC DEMONSTRATION", 48, 55, 10);
+    content += text("REFERRAL INTAKE / SYNTHETIC DEMONSTRATION", 48, 55, 10);
     content += text(document.name.replace(".pdf", ""), 48, 96, 24);
     content += text("Fictional example - not a patient record", 48, 125, 11);
     content += "0.83 0.87 0.8 RG 48 650 m 552 650 l S\n";

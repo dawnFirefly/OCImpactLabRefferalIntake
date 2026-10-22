@@ -1,10 +1,11 @@
-import { claudeProvider, type AnalysisProgress, type AnalysisPreview } from "../services/analysis";
+import { makeAnalysisProvider, type AnalysisProgress, type AnalysisPreview } from "../services/analysis";
 import { uploadPacket } from "../services/storage";
 import { createR01Mock } from "../data/r01Mock";
 import { createDemo } from "../data/demo";
 import type { Referral, Fact, Rule, PacketDocument, Intake, AnalysisMeta } from "../types";
 import { createDemoPdf } from "../lib/demoPdf";
 import { criteriaPrecedence, criteriaSource, unreviewedRules } from "#shared/decision-tree";
+import type { Workspace } from "#shared/workspace";
 import { maxPacketBytes } from "#shared/upload-limits";
 
 /** The full staged rubric with no findings: Application review shows every criterion before analysis. */
@@ -24,9 +25,70 @@ export type IntakeInput = Partial<Pick<StoredPacket, "name" | "receivedAt" | "so
 /** Review deadline: two hours after the referral was received. */
 export const REVIEW_WINDOW_MS = 2 * 60 * 60 * 1000;
 
-/** Session state. Uploading a PDF starts Claude analysis; stored packets are persisted by the server. */
+/** Root workspace: persistent applicants and browser-only synthetic examples. */
 export function useReviewWorkspace() {
   const referral = ref<Referral>(createDemo());
+  const aiSettings = useAiSettings();
+  const route = useRoute();
+  const router = useRouter();
+  const saveStates = ref(new Map<string, "saving" | "saved" | "error">());
+  const saveErrors = ref(new Map<string, string>());
+  const revisions = new Map<string, number>();
+  const loaded = new Set<string>();
+  const saves = new Map<string, Promise<void>>();
+  const dirty = new Set<string>();
+  const saveState = computed(() => saveStates.value.get(referral.value.id));
+  const saveError = computed(() => saveErrors.value.get(referral.value.id) || "");
+  function saveWorkspace(current = referral.value): Promise<void> {
+    if (!current.id.startsWith("stored-") || current.status === "analyzing" || !loaded.has(current.id)) return Promise.resolve();
+    const id = current.id;
+    const snapshot = JSON.parse(JSON.stringify(current));
+    dirty.add(id);
+    saveStates.value = new Map(saveStates.value).set(id, "saving");
+    const previous = saves.get(id) || Promise.resolve();
+    const job = previous.catch(() => {}).then(async () => {
+      try {
+        const result = await $fetch<Workspace>(`/api/applicants/${encodeURIComponent(packetId(id))}/workspace`, {
+          method: "PUT", body: { revision: revisions.get(id) || 0, referral: snapshot },
+        });
+        revisions.set(id, result.revision);
+        if (current.intake && current.status === "analyzed") current.intake.analysis = analysisMeta(current);
+        if (saves.get(id) === job) {
+          dirty.delete(id);
+          saveStates.value = new Map(saveStates.value).set(id, "saved");
+          saveErrors.value = new Map(saveErrors.value).set(id, "");
+        }
+      } catch (failure: any) {
+        saveStates.value = new Map(saveStates.value).set(id, "error");
+        saveErrors.value = new Map(saveErrors.value).set(id, failure?.data?.statusMessage || "The review could not be saved. Your changes remain in this tab. Retry before leaving.");
+        throw failure;
+      }
+    });
+    saves.set(id, job);
+    return job;
+  }
+  const retrySave = () => saveWorkspace().catch(() => {});
+  function saveLayout(layout: NonNullable<Referral["graphLayout"]>) {
+    if (referral.value.status === "analyzing") return;
+    referral.value.graphLayout = layout;
+    void saveWorkspace().catch(() => {});
+  }
+  async function flushSaves() { if (dirty.size) await Promise.all([...saves.values()]); }
+  function beforeLeave(event: BeforeUnloadEvent) {
+    if (dirty.size) { event.preventDefault(); event.returnValue = ""; }
+  }
+  async function restoreRouteApplicant() {
+    if (!["/processor", "/summary"].includes(route.path)) return;
+    const id = typeof route.query.applicant === "string" ? route.query.applicant : sessionStorage.getItem("referral-active-id");
+    if (!id?.startsWith("stored-")) return;
+    if (!applicants.value.some(a => a.id === id)) await loadStoredApplicants();
+    const desired = typeof route.query.applicant === "string" ? route.query.applicant : sessionStorage.getItem("referral-active-id");
+    if (desired !== id) return;
+    if (!applicants.value.some(a => a.id === id)) { error.value = "This applicant is unavailable or was deleted."; return; }
+    if (referral.value.id !== id) await selectApplicant(id);
+    else await loadStoredAnalysis(referral.value);
+  }
+  watch(() => [route.path, route.query.applicant], () => { if (import.meta.client) void restoreRouteApplicant().catch(() => { error.value = "The saved applicant could not be loaded. Please retry from the dashboard."; }); });
   const applicants = ref<Referral[]>([]);
   const error = ref("");
   const patientName = ref("");
@@ -116,6 +178,8 @@ export function useReviewWorkspace() {
   async function analyze() {
     if (analyzing.value || savingPdf.value) return;
     const current = referral.value;
+    if (dirty.has(current.id)) { error.value = "Save your pending review changes before analyzing again."; return; }
+    if (current.audit.some(a => a.type === "fact_review" || a.type === "rule_review")) { error.value = "This packet has coordinator edits. Add a separate applicant to reanalyze without replacing the saved review."; return; }
     // The name is optional: Claude reads it from the PDF. When given, it is checked against the packet.
     const name = patientName.value.trim();
     error.value = "";
@@ -133,11 +197,11 @@ export function useReviewWorkspace() {
       if (isStored(current)) {
         // The server reads the stored PDF and saves the result with the applicant.
         startPreview(current, name || current.title);
-        result = await claudeProvider.analyzeStored(packetId(current.id), name, handlers, request.signal);
+        result = await makeAnalysisProvider(aiSettings.value).analyzeStored(packetId(current.id), name, handlers, request.signal);
       } else {
         const file = await sourceFile(current, request.signal);
         startPreview(current, name || current.title);
-        result = await claudeProvider.analyze(file, name, handlers, request.signal);
+        result = await makeAnalysisProvider(aiSettings.value).analyze(file, name, handlers, request.signal);
       }
       if (request.signal.aborted || referral.value.id !== current.id) return;
       beforeAnalysis = null;
@@ -180,15 +244,19 @@ export function useReviewWorkspace() {
     if (index === -1) applicants.value.push(referral.value);
     else applicants.value[index] = referral.value;
   }
-  function selectApplicant(id: string) {
+  async function selectApplicant(id: string) {
     const applicant = applicants.value.find((a) => a.id === id);
     if (!applicant) return;
     cancelAnalysis();
     referral.value = applicant;
+    if (import.meta.client) {
+      if (isStored(applicant)) sessionStorage.setItem("referral-active-id", id);
+      else sessionStorage.removeItem("referral-active-id");
+    }
     patientName.value = namesByApplicant.get(id) || (applicant.status === "analyzed" || applicant.status === "awaiting_pdf" ? applicant.title : "");
     mode.value = id === "synthetic-demo" ? "synthetic" : id.startsWith("provided-") ? "provided" : "attached";
     error.value = "";
-    loadStoredAnalysis(applicant).catch(() => { error.value = "The saved analysis could not be loaded. Analyze again to refresh it."; });
+    await loadStoredAnalysis(applicant, true);
   }
   function addApplicant(name: string) {
     cancelAnalysis();
@@ -203,17 +271,13 @@ export function useReviewWorkspace() {
     rememberApplicant();
     return referral.value.id;
   }
-  /** Start a browser-session applicant directly from the selected file, without packet storage. */
-  function createApplicantForAnalysis(fields: IntakeInput, file: File) {
-    const id = addApplicant(fields.name || file.name);
-    const now = new Date().toISOString();
-    referral.value.intake = {
-      receivedAt: fields.receivedAt || now, uploadedAt: now, size: file.size,
-      source: fields.source || "", contact: fields.contact || "", priority: fields.priority || "routine",
-      reviewer: fields.reviewer || "", notes: fields.notes || "", reviewStatus: "in_review",
-    };
-    attach([file]); // Retains the original File locally and starts the foreground stream immediately.
-    return id;
+  /** Persist the original PDF and intake first; analysis never owns the only copy. */
+  async function createApplicantForAnalysis(fields: IntakeInput, file: File) {
+    const record = await createStoredApplicant({ ...fields, reviewStatus: fields.reviewStatus || "in_review" }, file);
+    await selectApplicant(record.id);
+    if (["/processor", "/summary"].includes(route.path)) await router.replace({ path: "/processor", query: { applicant: record.id } });
+    void analyze();
+    return record.id;
   }
   // ── Stored applicants: background analysis and saved results ───────────────
   const isStored = (r: Referral) => r.id.startsWith("stored-");
@@ -231,19 +295,27 @@ export function useReviewWorkspace() {
   function applyStoredResult(record: Referral, result: Referral, meta = analysisMeta(result)) {
     result.id = record.id;
     result.title = record.title;
-    result.intake = record.intake ? { ...record.intake, analysis: meta } : undefined;
+    result.intake = record.intake ? { ...record.intake, analysis: result.status === "analyzed" ? meta : record.intake.analysis } : undefined;
+    if (result.status === "analyzed") revisions.set(record.id, result.revision);
+    loaded.add(record.id);
     if (result.documents[0]) result.documents[0].local_url = record.documents[0]?.local_url;
     const index = applicants.value.findIndex((a) => a.id === record.id);
     if (index !== -1) applicants.value[index] = result;
     if (referral.value.id === record.id && referral.value.status !== "analyzing") referral.value = result;
     return result;
   }
-  /** Load a saved analysis instead of re-running Claude. */
-  async function loadStoredAnalysis(record: Referral) {
-    if (!isStored(record) || record.status === "analyzed" || !record.intake?.analysis) return;
-    const result = await $fetch<Referral>(`/api/applicants/${encodeURIComponent(packetId(record.id))}/analysis`);
-    const latest = applicants.value.find((a) => a.id === record.id);
-    if (latest && latest.status !== "analyzed") applyStoredResult(latest, result, record.intake.analysis);
+  /** Restore the complete saved graph, including edits and layout, once per session. */
+  async function loadStoredAnalysis(record: Referral, refresh = false) {
+    if (!isStored(record) || (!refresh && loaded.has(record.id)) || dirty.has(record.id)) return;
+    const saved = await $fetch<Workspace | null>(`/api/applicants/${encodeURIComponent(packetId(record.id))}/workspace`);
+    revisions.set(record.id, saved?.revision || 0);
+    loaded.add(record.id);
+    const latest = applicants.value.find(a => a.id === record.id);
+    if (saved && latest && !dirty.has(record.id) && latest.status !== "analyzing") {
+      applyStoredResult(latest, saved.referral, latest.intake?.analysis);
+      revisions.set(record.id, saved.revision);
+      saveStates.value = new Map(saveStates.value).set(record.id, "saved");
+    }
   }
   /** Queue a stored applicant for analysis; runs one at a time (the server allows one analysis). */
   function analyzeInBackground(id: string) {
@@ -264,7 +336,7 @@ export function useReviewWorkspace() {
         errors.delete(id);
         backgroundErrors.value = errors;
         try {
-          const result = await claudeProvider.analyzeStored(packetId(id), "", { onProgress() {}, onPreview() {} });
+          const result = await makeAnalysisProvider(aiSettings.value).analyzeStored(packetId(id), "", { onProgress() {}, onPreview() {} });
           const latest = applicants.value.find((a) => a.id === id);
           if (latest) applyStoredResult(latest, result);
         } catch (failure) {
@@ -294,8 +366,12 @@ export function useReviewWorkspace() {
   /** Adds stored applicants without replacing session records (and their edits) already loaded. */
   async function loadStoredApplicants() {
     const packets = await $fetch<StoredPacket[]>("/api/applicants");
+    const serverIds = new Set(packets.map(p => `stored-${p.id}`));
+    applicants.value = applicants.value.filter(a => !isStored(a) || serverIds.has(a.id) || dirty.has(a.id));
     for (const packet of packets) {
-      if (!applicants.value.some((a) => a.id === `stored-${packet.id}`)) applicants.value.push(storedReferral(packet));
+      const existing = applicants.value.find(a => a.id === `stored-${packet.id}`);
+      if (!existing) applicants.value.push(storedReferral(packet));
+      else { existing.title = packet.name; const { id, name, fileName, storage, ...intake } = packet; existing.intake = intake; }
     }
     return packets;
   }
@@ -308,8 +384,8 @@ export function useReviewWorkspace() {
     const record = storedReferral(packet);
     applicants.value.push(record);
     filesByApplicant.set(record.id, file);
-    // New referrals are analyzed right away; the result is saved with the applicant.
-    analyzeInBackground(record.id);
+    revisions.set(record.id, 0);
+    loaded.add(record.id);
     return record;
   }
   /** Saves intake/status edits, keeping the in-session review (facts, checklist, audit) intact. */
@@ -333,14 +409,20 @@ export function useReviewWorkspace() {
     return record;
   }
   async function deleteStoredApplicant(id: string) {
+    await saves.get(id)?.catch(() => {});
     if (id.startsWith("stored-")) await $fetch(`/api/applicants/${encodeURIComponent(id.replace(/^stored-/, ""))}`, { method: "DELETE" });
+    dirty.delete(id);
+    loaded.delete(id);
+    revisions.delete(id);
     filesByApplicant.delete(id);
     namesByApplicant.delete(id);
     applicants.value = applicants.value.filter((a) => a.id !== id);
     if (referral.value.id === id) selectApplicant("synthetic-demo");
   }
-  function resetDemo() {
+  async function resetDemo() {
+    try { await flushSaves(); } catch { return; }
     cancelAnalysis();
+    sessionStorage.removeItem("referral-active-id");
     patientName.value = "";
     attachedFiles.value = [];
     referral.value = createDemo();
@@ -348,6 +430,7 @@ export function useReviewWorkspace() {
     error.value = "";
     mode.value = "synthetic";
     rememberApplicant();
+    if (["/processor", "/summary"].includes(route.path) && route.query.applicant) await router.replace({ path: route.path, query: {} });
   }
   function useProvidedDocument(document: PacketDocument) {
     cancelAnalysis();
@@ -401,67 +484,35 @@ export function useReviewWorkspace() {
       /* No local examples configured; retain the synthetic flow. */
     }
   }
-  function attach(files: FileList | File[]) {
+  async function attach(files: FileList | File[]) {
     const list = Array.from(files);
-    if (!list.length) return;
-    if (
-      list.some(
-        (f) =>
-          !f.name.toLowerCase().endsWith(".pdf") || f.size > maxPacketBytes,
-      )
-    ) {
-      error.value = "Choose one PDF up to 50 MB.";
-      return;
-    }
-    if (list.length !== 1) {
-      error.value = "Choose one combined PDF per applicant. Switch applicants to review another packet.";
+    if (!list.length || savingPdf.value || analyzing.value) return;
+    if (list.length !== 1 || !list[0]!.name.toLowerCase().endsWith(".pdf") || !list[0]!.size || list[0]!.size > maxPacketBytes) {
+      error.value = "Choose one valid combined PDF up to 50 MB per applicant.";
       return;
     }
     error.value = "";
-    cancelAnalysis();
-    // Only a dashboard-named applicant carries a name to check; otherwise Claude reads it from the PDF.
-    patientName.value = referral.value.status === "awaiting_pdf" ? namesByApplicant.get(referral.value.id) || "" : "";
-    attachedFiles.value = list;
-    mode.value = "attached";
-    referral.value = {
-      id: referral.value.status === "awaiting_pdf" ? referral.value.id : crypto.randomUUID(),
-      title: referral.value.status === "awaiting_pdf" ? referral.value.title : list[0]!.name,
-      intake: referral.value.status === "awaiting_pdf" ? referral.value.intake : undefined,
-      status: "awaiting_claude",
-      revision: 0,
-      documents: list.map((f) => {
-        const url = URL.createObjectURL(f);
-        objectUrls.push(url);
-        return {
-          id: crypto.randomUUID(),
-          name: f.name,
-          page_count: null,
-          status: "awaiting_claude",
-          error: null,
-          pages: [],
-          local_url: url,
-        };
-      }),
-      facts: [],
-      evidence: [],
-      error: null,
-      audit: [],
-      checklist: rubric(),
-    } as Referral;
-    filesByApplicant.set(referral.value.id, list[0]!);
-    rememberApplicant();
-    // Uploading is the coordinator's explicit request: start the Claude analysis immediately.
-    void analyze();
+    savingPdf.value = true;
+    try {
+      const record = await createStoredApplicant({ name: list[0]!.name.replace(/\.pdf$/i, ""), reviewStatus: "in_review" }, list[0]!);
+      await selectApplicant(record.id);
+      savingPdf.value = false;
+      await router.replace({ path: "/processor", query: { applicant: record.id } });
+      void analyze();
+    } catch (failure: any) {
+      error.value = failure?.data?.statusMessage || "The applicant could not be saved. Try the upload again.";
+    } finally { savingPdf.value = false; }
   }
   function invalidateRecommendation() {
     if (!referral.value.recommendation) return;
     referral.value.recommendation = { status: "needs_information", reasons: ["Coordinator edits changed the review. Recheck linked requirements before a final decision."], rule_ids: [] };
   }
-  function updateFact(fact: Fact, value: string, note: string, status: string) {
+  async function updateFact(fact: Fact, value: string, note: string, status: string) {
     const current = referral.value.facts.find((f) => f.id === fact.id);
     if (!current) return;
     invalidateRecommendation();
     for (const rule of referral.value.checklist.rules.filter(r => r.fact_ids.includes(current.id))) {
+      rule.original_note ??= rule.note;
       rule.status = "uncertain";
       rule.note = "Linked fact changed by coordinator; reassess this requirement.";
     }
@@ -474,13 +525,17 @@ export function useReviewWorkspace() {
       id: current.id,
       note,
     });
+    referral.value.checklist.counts = Object.fromEntries([...new Set(referral.value.checklist.rules.map(r => r.status))].map(status => [status, referral.value.checklist.rules.filter(r => r.status === status).length]));
+    await saveWorkspace();
   }
-  function updateRule(rule: Rule, status: string, note: string) {
+  async function updateRule(rule: Rule, status: string, note: string) {
     const current = referral.value.checklist.rules.find(
       (r) => r.id === rule.id,
     );
     if (!current) return;
     invalidateRecommendation();
+    current.original_note ??= current.note;
+    current.review_note = note;
     current.status = status;
     current.note = note;
     referral.value.audit.push({
@@ -489,15 +544,25 @@ export function useReviewWorkspace() {
       id: current.id,
       note,
     });
+    referral.value.checklist.counts = Object.fromEntries([...new Set(referral.value.checklist.rules.map(r => r.status))].map(status => [status, referral.value.checklist.rules.filter(r => r.status === status).length]));
+    await saveWorkspace();
   }
-  onBeforeUnmount(() => { cancelAnalysis(); uploadController?.abort(); objectUrls.forEach((url) => URL.revokeObjectURL(url)); });
+  onBeforeUnmount(() => { if (import.meta.client) window.removeEventListener("beforeunload", beforeLeave); cancelAnalysis(); uploadController?.abort(); objectUrls.forEach((url) => URL.revokeObjectURL(url)); });
   onMounted(() => {
     installDemoPreviews();
     rememberApplicant();
-    loadProvidedDocuments();
+    window.addEventListener("beforeunload", beforeLeave);
+    void restoreRouteApplicant().catch(() => { error.value = "The saved applicant could not be loaded. Open it again from the dashboard."; });
+    if (!route.query.applicant && !sessionStorage.getItem("referral-active-id")) loadProvidedDocuments();
   });
   return {
     referral,
+    aiSettings,
+    saveState,
+    saveError,
+    retrySave,
+    saveLayout,
+    flushSaves,
     patientName,
     analyzing,
     savingPdf,

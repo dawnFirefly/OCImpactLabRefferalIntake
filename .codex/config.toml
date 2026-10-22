@@ -1,0 +1,7 @@
+# Official Cloudflare remote MCP servers (Streamable HTTP).
+# The API server requires Cloudflare OAuth; credentials are never stored here.
+[mcp_servers.cloudflare-api]
+url = "https://mcp.cloudflare.com/mcp"
+
+[mcp_servers.cloudflare-docs]
+url = "https://docs.mcp.cloudflare.com/mcp"

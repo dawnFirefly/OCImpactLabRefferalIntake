@@ -1,5 +1,5 @@
 <script setup lang="ts">
-useHead({ title: "Decision processor · ReferralReady" });
+useHead({ title: "Decision processor · Referral Intake" });
 </script>
 
 <template>

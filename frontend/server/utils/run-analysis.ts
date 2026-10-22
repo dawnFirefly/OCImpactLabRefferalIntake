@@ -5,14 +5,16 @@ import { extractionSchema, evaluationSchema, sectionSchema, factSchema, flattenF
 import { TopLevelArrayItems } from "./stream-json";
 import { callClaude, uploadPdf, deletePdf, AnalysisFailure } from "./claude";
 import { extractionPrompt, evaluationPrompt } from "./prompts";
-import { anthropicKey } from "./credentials";
+import { selectAi } from "./ai-provider";
+import { analyzeVision } from "./vision-analysis";
 
 /**
  * One analysis at a time per server instance. On Cloudflare Workers a killed invocation (e.g. Error 1102)
  * never runs `finally`, so the lock also expires on its own instead of blocking every later upload.
  */
-const lockMs = 4 * 60 * 1000;
+const lockMs = 20 * 60 * 1000;
 let busyUntil = 0;
+let lockOwner: symbol | undefined;
 
 /** A data-free validation reason: our own rule names or schema paths, never document values. */
 function validationReason(error: unknown) {
@@ -25,28 +27,42 @@ function validationReason(error: unknown) {
  * `section`/`fact`/`criteria`/`rule` preview events, then exactly one validated `result` or an `error`.
  * `onResult` (stored applicants) persists the validated referral before the result is sent.
  */
-export function streamAnalysis(event: H3Event, input: { pdf: Uint8Array; fileName: string; patientName: string; onResult?: (referral: Referral) => Promise<void> }) {
+export function streamAnalysis(event: H3Event, input: { pdf?: Uint8Array; pages?: string[]; fileName: string; patientName: string; onResult?: (referral: Referral) => Promise<void> }) {
   const { pdf, fileName, patientName, onResult } = input;
-  const config = useRuntimeConfig(event);
-  const apiKey = anthropicKey(config, event.context.cloudflare?.env);
-  if (!apiKey) throw createError({ statusCode: 503, statusMessage: "Claude is not configured. Set the server-only NUXT_ANTHROPIC_API_KEY secret." });
+  const selected = selectAi(event);
+  const apiKey = selected.apiKey;
+  if (selected.provider !== "anthropic" && !input.pages?.length) throw createError({ statusCode: 400, statusMessage: "This provider needs rendered PDF pages. Open the applicant and retry analysis." });
+  if (selected.provider === "anthropic" && !pdf?.length) throw createError({ statusCode: 400, statusMessage: "Attach the original PDF." });
   if (Date.now() < busyUntil) throw createError({ statusCode: 429, statusMessage: "Another analysis is running. Please wait and try again." });
+  const owner = Symbol();
+  lockOwner = owner;
   busyUntil = Date.now() + lockMs;
-  const release = () => { busyUntil = 0; };
+  const release = () => { if (lockOwner === owner) { busyUntil = 0; lockOwner = undefined; } };
   // Stop paying for Claude work when the coordinator cancels or closes the tab.
   const abort = new AbortController();
   event.node.res.on("close", () => { if (!event.node.res.writableFinished) abort.abort(); });
-  const { claudeExtractionModel: extractionModel, claudeReviewModel: reviewModel } = config;
+  const { extractionModel, reviewModel } = selected;
   setResponseHeader(event, "Content-Type", "application/x-ndjson; charset=utf-8");
   return new ReadableStream({
     async start(controller) {
-      const send = (payload: unknown) => controller.enqueue(new TextEncoder().encode(`${JSON.stringify(payload)}\n`));
+      const send = (payload: unknown) => { if (!abort.signal.aborted) controller.enqueue(new TextEncoder().encode(`${JSON.stringify(payload)}\n`)); };
+      const persistResult = async (referral: Referral) => {
+        if (onResult) {
+          try { await onResult(referral); } catch { throw new AnalysisFailure(409, "Analysis completed but the review could not be saved (it may have changed in another tab). Reopen the applicant before retrying."); }
+        }
+        send({ type: "result", referral, saved: !!onResult });
+      };
       let uploadedFileId: string | null = null;
       try {
+        if (selected.provider !== "anthropic") {
+          const result = await analyzeVision(selected, input.pages!, patientName, fileName, abort.signal, send);
+          await persistResult(result);
+          return;
+        }
         // Always reference the PDF via the Files API: no base64 copy or multi-MB JSON body on the Worker
         // (CPU budget), and PDFs up to 50 MB fit (inline requests are capped at 32 MB). Deleted in `finally`.
         send({ type: "progress", stage: "uploading", message: "Sending the PDF to Claude…" });
-        uploadedFileId = await uploadPdf(apiKey, pdf, fileName, abort.signal);
+        uploadedFileId = await uploadPdf(apiKey, pdf!, fileName, abort.signal);
         const pdfSource = { type: "file" as const, file_id: uploadedFileId };
         send({ type: "progress", stage: "extracting", message: "Pass 1 of 2 · Claude Haiku is reading the PDF, finding forms, facts and their positions." });
         // Preview items are shape-checked only; cross-references are validated on the complete result.
@@ -85,12 +101,8 @@ export function streamAnalysis(event: H3Event, input: { pdf: Uint8Array; fileNam
           { type: "text", text: `UNTRUSTED EXTRACTED DOCUMENT DATA:\n${JSON.stringify(extraction)}` },
         ] });
         const referral = toReferral(extraction, validateEvaluation(evaluated, extraction), patientName, fileName);
-        // Persist before reporting, so a stored applicant never has to be re-analyzed.
-        let saved = false;
-        if (onResult) {
-          try { await onResult(referral); saved = true; } catch (failure) { console.error("Saving the analysis failed", failure); }
-        }
-        send({ type: "result", referral, saved });
+        referral.analysisProvider = { provider: "anthropic", extractionModel, reviewModel };
+        await persistResult(referral);
       } catch (error) {
         send({ type: "error", message: error instanceof AnalysisFailure ? error.message
           : `The analysis did not pass evidence validation (${validationReason(error)}). No result was applied. Please retry or review the PDF manually.` });

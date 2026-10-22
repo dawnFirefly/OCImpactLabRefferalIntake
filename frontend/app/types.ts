@@ -5,7 +5,7 @@ export type Evidence = {
   quote: string;
   bbox: [number, number, number, number] | null;
   confidence: number | null;
-  method: "synthetic" | "claude";
+  method: "synthetic" | "claude" | "cloudflare" | "opencode";
 };
 export type Fact = {
   section_ids?: string[];
@@ -47,6 +47,8 @@ export type Rule = {
   status: string;
   fact_ids: string[];
   note: string;
+  original_note?: string;
+  review_note?: string;
   human_review?: boolean;
   /** Source FORM rule replaced by an internal-outline rule (precedence). */
   superseded_by?: string;
@@ -85,6 +87,8 @@ export type Intake = {
   analysis?: AnalysisMeta;
 };
 export type Referral = {
+  graphLayout?: { positions: Record<string, { x: number; y: number }>; viewport?: { x: number; y: number; zoom: number } };
+  analysisProvider?: { provider: "cloudflare" | "anthropic" | "opencode"; extractionModel: string; reviewModel: string };
   sections?: DocumentSection[];
   recommendation?: Recommendation;
   id: string;

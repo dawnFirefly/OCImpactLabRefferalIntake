@@ -12,7 +12,7 @@ import { REVIEW_WINDOW_MS } from "~/composables/useReviewWorkspace";
  * criteria and gaps, beside the source PDF. Read-only; the coordinator decides.
  */
 const { referral } = inject<ReturnType<typeof useReviewWorkspace>>("review-workspace")!;
-useHead({ title: "Summary · ReferralReady" });
+useHead({ title: "Summary · Referral Intake" });
 
 type Tone = "ok" | "bad" | "warn" | "idle";
 const rules = computed(() => referral.value.checklist.rules);
@@ -46,7 +46,7 @@ const decision = computed(() => {
     const label = rec.outcome ? outcomeLabels[rec.outcome]
       : { recommend_approval: "Approved", recommend_denial: "Denied", needs_information: "More information needed" }[rec.status];
     const tone: Tone = rec.status === "recommend_approval" ? "ok" : rec.status === "recommend_denial" ? "bad" : "warn";
-    return { label, stage: rec.stage ?? null, reasons: rec.reasons, tone, source: "Claude recommendation from the staged IHH decision tree" };
+    return { label, stage: rec.stage ?? null, reasons: rec.reasons, tone, source: "AI recommendation from the staged IHH decision tree" };
   }
   if (!treeView.value || !reviewed.value) return null;
   const t = tree.value;
@@ -206,7 +206,7 @@ const toneClass = (tone: Tone) => `tone-${tone}`;
         <CardHeader>
           <CardTitle>{{ referral.status === "analyzing" ? "Analysis in progress" : "Not analyzed yet" }}</CardTitle>
           <CardDescription>
-            {{ referral.status === "analyzing" ? "The summary fills in once Claude finishes reviewing the packet." : "Run the analysis in the processor to see the recommendation, documents and criteria here." }}
+            {{ referral.status === "analyzing" ? "The summary fills in once AI finishes reviewing the packet." : "Run the analysis in the processor to see the recommendation, documents and criteria here." }}
           </CardDescription>
         </CardHeader>
         <CardContent><Button as-child><NuxtLink to="/processor">Open processor</NuxtLink></Button></CardContent>
@@ -339,7 +339,7 @@ const toneClass = (tone: Tone) => `tone-${tone}`;
           :focus-key="focusTick"
           :bbox="currentEvidence && currentEvidence.page === viewerPage ? currentEvidence.bbox : null"
           :cited-pages="[...new Set((selection?.evidence || []).map((e) => e.page))]"
-          :box-note="currentEvidence?.method === 'claude' ? 'Highlight position is approximate (located by Claude) · verify against the page.' : ''"
+          :box-note="currentEvidence && currentEvidence.method !== 'synthetic' ? 'Highlight position is approximate (located by AI) · verify against the page.' : ''"
         />
         <div v-else class="grid h-full place-items-center text-sm text-muted-foreground">No PDF to show.</div>
         </ClientOnly>
